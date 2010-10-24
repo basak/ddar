@@ -22,11 +22,9 @@
 
 struct scan_t {
     /* The main read buffer itself */
-    unsigned char *buffer;
+    unsigned char *buffer[2];
+    unsigned char *buffer_end;
     int buffer_size;
-
-    unsigned char *buffer2; /* half-way through the buffer for double-buffering */
-    unsigned char *buffer3; /* one past the end of the buffer for double-buffering */
 
     /* Reading the source file */
     int fd;
@@ -63,20 +61,20 @@ static inline void read_more_data(struct scan_t *scan) {
     unsigned char *buffer;
     int bytes_read;
 
-    assert(head == scan->buffer || head == scan->buffer2 ||
-	    head == scan->buffer3);
+    assert(head == scan->buffer[0] || head == scan->buffer[1] ||
+	    head == scan->buffer_end);
 
     if (scan->source_bytes_left <= 0) {
 	scan->eof = 1;
 	return;
     }
 
-    if (head == scan->buffer3 || head == scan->buffer) {
+    if (head == scan->buffer_end || head == scan->buffer[0]) {
 	/* Read into first buffer */
-	buffer = scan->buffer;
+	buffer = scan->buffer[0];
     } else {
 	/* Read into second buffer */
-	buffer = scan->buffer2;
+	buffer = scan->buffer[1];
     }
     if (remap_file_pages(buffer, scan->buffer_size / 2, 0, scan->source_offset / scan->page_size, 0)) {
 	perror("remap_file_pages");
@@ -103,11 +101,11 @@ static inline void boundary_hit(struct scan_t *scan, unsigned char *boundary,
     char sha256_digest_string[65];
 
     sha256_init(&sha256);
-    if (scan->buffer + chunk_size > boundary) {
+    if (scan->buffer[0] + chunk_size > boundary) {
 	/* chunk is wrapped */
 	sha256_update(&sha256, boundary + scan->buffer_size - chunk_size,
-		chunk_size - (boundary - scan->buffer));
-	sha256_update(&sha256, scan->buffer, boundary - scan->buffer);
+		chunk_size - (boundary - scan->buffer[0]));
+	sha256_update(&sha256, scan->buffer[0], boundary - scan->buffer[0]);
     } else {
 	sha256_update(&sha256, boundary-chunk_size, chunk_size);
     }
@@ -181,19 +179,19 @@ static inline int find_chunk_boundary(struct scan_t *scan) {
     /* Move forward by the minimum_chunk_size */
     scan->p += scan->minimum_chunk_size;
     scan->bytes_left -= scan->minimum_chunk_size;
-    if (unlikely(scan->p >= scan->buffer3))
+    if (unlikely(scan->p >= scan->buffer_end))
 	scan->p -= scan->buffer_size;
     current_chunk_size = scan->minimum_chunk_size;
 
     /* Calculate the first hash (aligned to the end of the minimum chunk size)
      * */
-    if(unlikely(scan->p < scan->buffer + scan->window_size)) {
+    if(unlikely(scan->p < scan->buffer[0] + scan->window_size)) {
 	/* scan->p has wrapped; hash calculation must take place in two
 	 * sections */
-	temp = scan->window_size - (scan->p - scan->buffer);
+	temp = scan->window_size - (scan->p - scan->buffer[0]);
 	/* temp is the amount before the wrap */
-	old = scan->buffer3 - temp;
-	hash = rabin_hash_split(scan->rabin_ctx, old, temp, scan->buffer);
+	old = scan->buffer_end - temp;
+	hash = rabin_hash_split(scan->rabin_ctx, old, temp, scan->buffer[0]);
     } else {
 	old = scan->p - scan->window_size;
 	hash = rabin_hash(scan->rabin_ctx, old);
@@ -223,10 +221,10 @@ static inline int find_chunk_boundary(struct scan_t *scan) {
 	    }
 	    hash = rabin_hash_next(scan->rabin_ctx, hash, *old, *scan->p);
 	    scan->p += 1;
-	    if (unlikely(scan->p >= scan->buffer3))
+	    if (unlikely(scan->p >= scan->buffer_end))
 		scan->p -= scan->buffer_size;
 	    old += 1;
-	    if (unlikely(old >= scan->buffer3))
+	    if (unlikely(old >= scan->buffer_end))
 		old -= scan->buffer_size;
 	    scan->bytes_left -= 1;
 	    current_chunk_size += 1;
@@ -276,15 +274,15 @@ int main(int argc, char **argv) {
     }
 
     scan.buffer_size = 1<<24;
-    scan.buffer = mmap(0, scan.buffer_size, PROT_READ, MAP_SHARED, scan.fd, 0);
-    if (scan.buffer == MAP_FAILED) {
+    scan.buffer[0] = mmap(0, scan.buffer_size, PROT_READ, MAP_SHARED, scan.fd, 0);
+    if (scan.buffer[0] == MAP_FAILED) {
 	perror("mmap");
 	return EXIT_FAILURE;
     }
-    madvise(scan.buffer, scan.buffer_size / 2, MADV_WILLNEED);
-    scan.buffer2 = scan.buffer + scan.buffer_size/2;
-    scan.buffer3 = scan.buffer + scan.buffer_size;
-    scan.p = scan.buffer;
+    madvise(scan.buffer[0], scan.buffer_size / 2, MADV_WILLNEED);
+    scan.buffer[1] = scan.buffer[0] + scan.buffer_size/2;
+    scan.buffer_end = scan.buffer[0] + scan.buffer_size;
+    scan.p = scan.buffer[0];
     scan.bytes_left = 0;
     scan.eof = 0;
 
