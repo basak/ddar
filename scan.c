@@ -1,4 +1,3 @@
-#define _XOPEN_SOURCE 600
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #include <stdlib.h>
@@ -8,6 +7,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <fcntl.h>
 #include <byteswap.h>
 #include <inttypes.h>
@@ -28,8 +28,11 @@ struct scan_t {
     unsigned char *buffer2; /* half-way through the buffer for double-buffering */
     unsigned char *buffer3; /* one past the end of the buffer for double-buffering */
 
-    /* Reading the read buffer */
+    /* Reading the source file */
     int fd;
+    unsigned long long source_bytes_left;
+    unsigned long long source_offset;
+    int page_size;
 
     unsigned char *p;
     int bytes_left;
@@ -55,38 +58,40 @@ static void print_sqlite3_error(sqlite3 *db) {
     fputc('\n', stderr);
 }
 
-static inline void fill_buffer(struct scan_t *scan, unsigned char *head) {
-    int bytes_to_fill = scan->buffer_size / 2;
-    int result;
-
-    while (bytes_to_fill) {
-	result = TEMP_FAILURE_RETRY(read(scan->fd, head, bytes_to_fill));
-	if (result < 0) {
-	    perror("read");
-	    exit(1);
-	} else if (!result) {
-	    scan->eof = 1;
-	    return;
-	}
-	bytes_to_fill -= result;
-	head += result;
-	scan->bytes_left += result;
-    }
-}
-
 static inline void read_more_data(struct scan_t *scan) {
     unsigned char *head = scan->p + scan->bytes_left;
+    unsigned char *buffer;
+    int bytes_read;
 
     assert(head == scan->buffer || head == scan->buffer2 ||
 	    head == scan->buffer3);
 
+    if (scan->source_bytes_left <= 0) {
+	scan->eof = 1;
+	return;
+    }
+
     if (head == scan->buffer3 || head == scan->buffer) {
 	/* Read into first buffer */
-	fill_buffer(scan, scan->buffer);
+	buffer = scan->buffer;
     } else {
 	/* Read into second buffer */
-	fill_buffer(scan, scan->buffer2);
+	buffer = scan->buffer2;
     }
+    if (remap_file_pages(buffer, scan->buffer_size / 2, 0, scan->source_offset / scan->page_size, 0)) {
+	perror("remap_file_pages");
+	abort();
+    }
+    madvise(buffer, scan->buffer_size / 2, MADV_WILLNEED);
+
+    if (scan->source_bytes_left >= scan->buffer_size / 2)
+	bytes_read = scan->buffer_size / 2;
+    else
+	bytes_read = scan->source_bytes_left;
+
+    scan->source_bytes_left -= bytes_read;
+    scan->source_offset += bytes_read;
+    scan->bytes_left += bytes_read;
 }
 
 /* boundary points to where the next chunk would be; going backwards to find
@@ -231,13 +236,24 @@ static inline int find_chunk_boundary(struct scan_t *scan) {
 
 int main(int argc, char **argv) {
     struct scan_t scan;
+    struct stat st;
 
-    scan.fd = open(argv[1], O_RDONLY);
+    scan.page_size = sysconf(_SC_PAGESIZE);
+    if (scan.page_size < 0) {
+	perror("sysconf");
+	return EXIT_FAILURE;
+    }
+
+    scan.fd = open(argv[1], O_RDWR);
     if (scan.fd < 0) {
 	perror("open");
 	return EXIT_FAILURE;
     }
-    posix_fadvise(scan.fd, 0, 0, POSIX_FADV_SEQUENTIAL);
+    if (fstat(scan.fd, &st) < 0) {
+	perror("fstat");
+	return EXIT_FAILURE;
+    }
+    scan.source_bytes_left = st.st_size;
     if (sqlite3_open(argv[2], &scan.db) != SQLITE_OK) {
 	print_sqlite3_error(scan.db);
 	return EXIT_FAILURE;
@@ -260,16 +276,22 @@ int main(int argc, char **argv) {
     }
 
     scan.buffer_size = 1<<24;
-    scan.buffer = malloc(scan.buffer_size);
-    if (!scan.buffer) {
-	perror("malloc");
+    scan.buffer = mmap(0, scan.buffer_size, PROT_READ, MAP_SHARED, scan.fd, 0);
+    if (scan.buffer == MAP_FAILED) {
+	perror("mmap");
 	return EXIT_FAILURE;
     }
+    madvise(scan.buffer, scan.buffer_size / 2, MADV_WILLNEED);
     scan.buffer2 = scan.buffer + scan.buffer_size/2;
     scan.buffer3 = scan.buffer + scan.buffer_size;
     scan.p = scan.buffer;
     scan.bytes_left = 0;
     scan.eof = 0;
+
+    scan.bytes_left = scan.source_bytes_left > scan.buffer_size ?
+			    scan.buffer_size : scan.source_bytes_left;
+    scan.source_bytes_left -= scan.bytes_left;
+    scan.source_offset = scan.bytes_left;
 
     scan.window_size = 48;
     scan.target_chunk_size = 1 << 16;
