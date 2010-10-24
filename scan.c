@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 600
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #include <stdlib.h>
@@ -236,6 +237,7 @@ int main(int argc, char **argv) {
 	perror("open");
 	return EXIT_FAILURE;
     }
+    posix_fadvise(scan.fd, 0, 0, POSIX_FADV_SEQUENTIAL);
     if (sqlite3_open(argv[2], &scan.db) != SQLITE_OK) {
 	print_sqlite3_error(scan.db);
 	return EXIT_FAILURE;
