@@ -22,7 +22,7 @@
 
 struct scan_t {
     /* The main read buffer itself */
-    unsigned char *buffer[2];
+    unsigned char *buffer[3];
     unsigned char *buffer_end;
     int buffer_size;
 
@@ -58,38 +58,45 @@ static void print_sqlite3_error(sqlite3 *db) {
 
 static inline void read_more_data(struct scan_t *scan) {
     unsigned char *head = scan->p + scan->bytes_left;
-    unsigned char *buffer;
+    unsigned char *readahead_buffer;
     int bytes_read;
 
     assert(head == scan->buffer[0] || head == scan->buffer[1] ||
+	    head == scan->buffer[2] ||
 	    head == scan->buffer_end);
+
+    if (head == scan->buffer_end)
+	head = scan->buffer[0];
 
     if (scan->source_bytes_left <= 0) {
 	scan->eof = 1;
 	return;
     }
 
-    if (head == scan->buffer_end || head == scan->buffer[0]) {
-	/* Read into first buffer */
-	buffer = scan->buffer[0];
-    } else {
-	/* Read into second buffer */
-	buffer = scan->buffer[1];
-    }
-    if (remap_file_pages(buffer, scan->buffer_size / 2, 0, scan->source_offset / scan->page_size, 0)) {
-	perror("remap_file_pages");
-	abort();
-    }
-    madvise(buffer, scan->buffer_size / 2, MADV_WILLNEED);
+    if (head == scan->buffer[0])
+	readahead_buffer = scan->buffer[1];
+    else if (head == scan->buffer[1])
+	readahead_buffer = scan->buffer[2];
+    else if (head == scan->buffer[2])
+	readahead_buffer = scan->buffer[0];
 
-    if (scan->source_bytes_left >= scan->buffer_size / 2)
-	bytes_read = scan->buffer_size / 2;
+    if (scan->source_bytes_left >= scan->buffer_size / 3)
+	bytes_read = scan->buffer_size / 3;
     else
 	bytes_read = scan->source_bytes_left;
 
     scan->source_bytes_left -= bytes_read;
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
+
+    if (scan->source_bytes_left) {
+	madvise(readahead_buffer, scan->buffer_size / 3, MADV_DONTNEED);
+	if (remap_file_pages(readahead_buffer, scan->buffer_size / 3, 0, scan->source_offset / scan->page_size, 0)) {
+	    perror("remap_file_pages");
+	    abort();
+	}
+	madvise(readahead_buffer, scan->buffer_size / 3, MADV_WILLNEED);
+    }
 }
 
 /* boundary points to where the next chunk would be; going backwards to find
@@ -273,21 +280,21 @@ int main(int argc, char **argv) {
 	return EXIT_FAILURE;
     }
 
-    scan.buffer_size = 1<<24;
+    scan.buffer_size = 3 * (1<<20);
     scan.buffer[0] = mmap(0, scan.buffer_size, PROT_READ, MAP_SHARED, scan.fd, 0);
     if (scan.buffer[0] == MAP_FAILED) {
 	perror("mmap");
 	return EXIT_FAILURE;
     }
-    madvise(scan.buffer[0], scan.buffer_size / 2, MADV_WILLNEED);
-    scan.buffer[1] = scan.buffer[0] + scan.buffer_size/2;
+    madvise(scan.buffer[0], scan.buffer_size, MADV_WILLNEED);
+    scan.buffer[1] = scan.buffer[0] + scan.buffer_size/3;
+    scan.buffer[2] = scan.buffer[1] + scan.buffer_size/3;
     scan.buffer_end = scan.buffer[0] + scan.buffer_size;
     scan.p = scan.buffer[0];
-    scan.bytes_left = 0;
     scan.eof = 0;
 
-    scan.bytes_left = scan.source_bytes_left > scan.buffer_size ?
-			    scan.buffer_size : scan.source_bytes_left;
+    scan.bytes_left = scan.source_bytes_left > 2 * scan.buffer_size / 3 ?
+			    2 * scan.buffer_size / 3 : scan.source_bytes_left;
     scan.source_bytes_left -= scan.bytes_left;
     scan.source_offset = scan.bytes_left;
 
