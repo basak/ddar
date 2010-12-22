@@ -38,7 +38,7 @@ struct scan_t {
 
     int eof; /* if EOF has been read */
 
-    struct rabin_t *rabin_ctx;
+    struct rabin_ctx *rabin_ctx;
 
     int window_size;
     int target_chunk_size;

@@ -1,17 +1,17 @@
 #include "rabin.h"
 
-struct rabin_t {
+struct rabin_ctx {
     uint32_t *a_exp;
     int k;
 };
 
-struct rabin_t *rabin_init(uint32_t a, int k) {
+struct rabin_ctx *rabin_init(uint32_t a, int k) {
     int i;
     uint32_t *a_exp;
     uint32_t acc;
-    struct rabin_t *ctx;
+    struct rabin_ctx *ctx;
 
-    ctx = (struct rabin_t *)malloc(sizeof(struct rabin_t));
+    ctx = (struct rabin_ctx *)malloc(sizeof(struct rabin_ctx));
     if (!ctx)
 	return 0;
     a_exp = (uint32_t *)malloc(sizeof(uint32_t) * k);
@@ -33,12 +33,12 @@ struct rabin_t *rabin_init(uint32_t a, int k) {
     return ctx;
 }
 
-void rabin_free(struct rabin_t *ctx) {
+void rabin_free(struct rabin_ctx *ctx) {
     free(ctx->a_exp);
     free(ctx);
 }
 
-uint32_t rabin_hash(const struct rabin_t *ctx, const unsigned char *p) {
+uint32_t rabin_hash(const struct rabin_ctx *ctx, const unsigned char *p) {
     int i;
     uint32_t acc=0;
     for (i=ctx->k-1; i>=0; i--, p++) {
@@ -47,7 +47,7 @@ uint32_t rabin_hash(const struct rabin_t *ctx, const unsigned char *p) {
     return acc;
 }
 
-uint32_t rabin_hash_split(const struct rabin_t *ctx, const unsigned char *p,
+uint32_t rabin_hash_split(const struct rabin_ctx *ctx, const unsigned char *p,
 	int size, const unsigned char *p2) {
     int i;
     uint32_t acc=0;
@@ -59,7 +59,7 @@ uint32_t rabin_hash_split(const struct rabin_t *ctx, const unsigned char *p,
     return acc;
 }
 
-uint32_t rabin_hash_next(const struct rabin_t *ctx, uint32_t hash, unsigned
+uint32_t rabin_hash_next(const struct rabin_ctx *ctx, uint32_t hash, unsigned
 	char old, unsigned char new) {
     hash -= ctx->a_exp[ctx->k-1] * old;
     hash *= ctx->a_exp[1];
