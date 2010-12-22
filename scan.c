@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 600
 #define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #include <stdlib.h>
@@ -11,6 +12,8 @@
 #include <fcntl.h>
 #include <byteswap.h>
 #include <inttypes.h>
+#include <aio.h>
+#include <string.h>
 
 #include "sqlite3.h"
 
@@ -28,9 +31,7 @@ struct scan_t {
 
     /* Reading the source file */
     int fd;
-    unsigned long long source_bytes_left;
     unsigned long long source_offset;
-    int page_size;
 
     unsigned char *p;
     int bytes_left;
@@ -48,6 +49,7 @@ struct scan_t {
     sqlite3_stmt *db_insert_stmt;
 
     int64_t offset;
+    struct aiocb aiocb;
 };
 
 static void print_sqlite3_error(sqlite3 *db) {
@@ -56,10 +58,55 @@ static void print_sqlite3_error(sqlite3 *db) {
     fputc('\n', stderr);
 }
 
+void start_aio(struct scan_t *scan, unsigned char *buffer) {
+    memset(&scan->aiocb, 0, sizeof(scan->aiocb));
+    scan->aiocb.aio_buf = buffer;
+    scan->aiocb.aio_nbytes = scan->buffer_size / 3;
+    scan->aiocb.aio_fildes = scan->fd;
+    scan->aiocb.aio_offset = scan->source_offset;
+    if (aio_read(&scan->aiocb)) {
+	perror("aio_read");
+	abort();
+    }
+}
+
+void finish_aio(struct scan_t *scan) {
+    int bytes_read;
+
+    const struct aiocb *cblist[1] = { &scan->aiocb };
+    if (aio_suspend(cblist, 1, 0)) {
+	perror("aio_suspend");
+	abort();
+    }
+    if (aio_error(&scan->aiocb)) {
+	perror("aio_error");
+	abort();
+    }
+    bytes_read = aio_return(&scan->aiocb);
+    if (!bytes_read) {
+	scan->eof = 1;
+	return;
+    }
+
+    posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+    scan->source_offset += bytes_read;
+    scan->bytes_left += bytes_read;
+
+    /* Currently no handling of short aio_read */
+    if (bytes_read != scan->buffer_size / 3) {
+	/* Check that we really have EOF and not some other reason for the
+	   short read */
+	assert(lseek(scan->fd, SEEK_SET, scan->source_offset) == (off_t)-1 && errno == EINVAL);
+	scan->eof = 1;
+    }
+}
+
 static inline void read_more_data(struct scan_t *scan) {
     unsigned char *head = scan->p + scan->bytes_left;
     unsigned char *readahead_buffer;
-    int bytes_read;
+
+    if (scan->eof)
+	return;
 
     assert(head == scan->buffer[0] || head == scan->buffer[1] ||
 	    head == scan->buffer[2] ||
@@ -68,11 +115,6 @@ static inline void read_more_data(struct scan_t *scan) {
     if (head == scan->buffer_end)
 	head = scan->buffer[0];
 
-    if (scan->source_bytes_left <= 0) {
-	scan->eof = 1;
-	return;
-    }
-
     if (head == scan->buffer[0])
 	readahead_buffer = scan->buffer[1];
     else if (head == scan->buffer[1])
@@ -80,23 +122,10 @@ static inline void read_more_data(struct scan_t *scan) {
     else if (head == scan->buffer[2])
 	readahead_buffer = scan->buffer[0];
 
-    if (scan->source_bytes_left >= scan->buffer_size / 3)
-	bytes_read = scan->buffer_size / 3;
-    else
-	bytes_read = scan->source_bytes_left;
+    finish_aio(scan);
 
-    scan->source_bytes_left -= bytes_read;
-    scan->source_offset += bytes_read;
-    scan->bytes_left += bytes_read;
-
-    if (scan->source_bytes_left) {
-	madvise(readahead_buffer, scan->buffer_size / 3, MADV_DONTNEED);
-	if (remap_file_pages(readahead_buffer, scan->buffer_size / 3, 0, scan->source_offset / scan->page_size, 0)) {
-	    perror("remap_file_pages");
-	    abort();
-	}
-	madvise(readahead_buffer, scan->buffer_size / 3, MADV_WILLNEED);
-    }
+    if (!scan->eof)
+	start_aio(scan, readahead_buffer);
 }
 
 /* boundary points to where the next chunk would be; going backwards to find
@@ -241,24 +270,12 @@ static inline int find_chunk_boundary(struct scan_t *scan) {
 
 int main(int argc, char **argv) {
     struct scan_t scan;
-    struct stat st;
-
-    scan.page_size = sysconf(_SC_PAGESIZE);
-    if (scan.page_size < 0) {
-	perror("sysconf");
-	return EXIT_FAILURE;
-    }
 
     scan.fd = open(argv[1], O_RDWR);
     if (scan.fd < 0) {
 	perror("open");
 	return EXIT_FAILURE;
     }
-    if (fstat(scan.fd, &st) < 0) {
-	perror("fstat");
-	return EXIT_FAILURE;
-    }
-    scan.source_bytes_left = st.st_size;
     if (sqlite3_open(argv[2], &scan.db) != SQLITE_OK) {
 	print_sqlite3_error(scan.db);
 	return EXIT_FAILURE;
@@ -281,22 +298,24 @@ int main(int argc, char **argv) {
     }
 
     scan.buffer_size = 3 * (1<<20);
-    scan.buffer[0] = mmap(0, scan.buffer_size, PROT_READ, MAP_SHARED, scan.fd, 0);
-    if (scan.buffer[0] == MAP_FAILED) {
-	perror("mmap");
+    scan.buffer[0] = malloc(scan.buffer_size);
+    if (!scan.buffer[0]) {
+	perror("malloc");
 	return EXIT_FAILURE;
     }
-    madvise(scan.buffer[0], scan.buffer_size, MADV_WILLNEED);
+
     scan.buffer[1] = scan.buffer[0] + scan.buffer_size/3;
     scan.buffer[2] = scan.buffer[1] + scan.buffer_size/3;
     scan.buffer_end = scan.buffer[0] + scan.buffer_size;
     scan.p = scan.buffer[0];
     scan.eof = 0;
+    scan.bytes_left = 0;
+    scan.source_offset = 0;
 
-    scan.bytes_left = scan.source_bytes_left > 2 * scan.buffer_size / 3 ?
-			    2 * scan.buffer_size / 3 : scan.source_bytes_left;
-    scan.source_bytes_left -= scan.bytes_left;
-    scan.source_offset = scan.bytes_left;
+    start_aio(&scan, scan.buffer[0]);
+    finish_aio(&scan);
+    if (!scan.eof)
+	start_aio(&scan, scan.buffer[1]);
 
     scan.window_size = 48;
     scan.target_chunk_size = 1 << 16;
