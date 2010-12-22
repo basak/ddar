@@ -23,7 +23,7 @@
 #define likely(x) __builtin_expect(x, 1)
 #define unlikely(x) __builtin_expect(x, 0)
 
-struct scan_t {
+struct scan_ctx {
     /* The main read buffer itself */
     unsigned char *buffer[3];
     unsigned char *buffer_end;
@@ -58,7 +58,7 @@ static void print_sqlite3_error(sqlite3 *db) {
     fputc('\n', stderr);
 }
 
-void start_aio(struct scan_t *scan, unsigned char *buffer) {
+void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
     memset(&scan->aiocb, 0, sizeof(scan->aiocb));
     scan->aiocb.aio_buf = buffer;
     scan->aiocb.aio_nbytes = scan->buffer_size / 3;
@@ -70,7 +70,7 @@ void start_aio(struct scan_t *scan, unsigned char *buffer) {
     }
 }
 
-void finish_aio(struct scan_t *scan) {
+void finish_aio(struct scan_ctx *scan) {
     int bytes_read;
 
     const struct aiocb *cblist[1] = { &scan->aiocb };
@@ -101,7 +101,7 @@ void finish_aio(struct scan_t *scan) {
     }
 }
 
-static inline void read_more_data(struct scan_t *scan) {
+static inline void read_more_data(struct scan_ctx *scan) {
     unsigned char *head = scan->p + scan->bytes_left;
     unsigned char *readahead_buffer;
 
@@ -130,7 +130,7 @@ static inline void read_more_data(struct scan_t *scan) {
 
 /* boundary points to where the next chunk would be; going backwards to find
  * the start point may involve wrapping around the circular buffer */
-static inline void boundary_hit(struct scan_t *scan, unsigned char *boundary,
+static inline void boundary_hit(struct scan_ctx *scan, unsigned char *boundary,
 	int chunk_size) {
     sha256_ctx sha256;
     unsigned char sha256_digest[32];
@@ -189,7 +189,7 @@ static inline void boundary_hit(struct scan_t *scan, unsigned char *boundary,
 }
 
 /* Returns 1 for go-again, 0 for EOF reached */
-static inline int find_chunk_boundary(struct scan_t *scan) {
+static inline int find_chunk_boundary(struct scan_ctx *scan) {
     uint32_t hash;
     int current_chunk_size;
     int temp;
@@ -269,7 +269,7 @@ static inline int find_chunk_boundary(struct scan_t *scan) {
 }
 
 int main(int argc, char **argv) {
-    struct scan_t scan;
+    struct scan_ctx scan;
 
     scan.fd = open(argv[1], O_RDWR);
     if (scan.fd < 0) {
