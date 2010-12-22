@@ -268,73 +268,102 @@ static inline int find_chunk_boundary(struct scan_ctx *scan) {
     }
 }
 
-int main(int argc, char **argv) {
-    struct scan_ctx scan;
+struct scan_ctx *scan_init(void) {
+    struct scan_ctx *scan;
 
-    scan.fd = open(argv[1], O_RDWR);
-    if (scan.fd < 0) {
+    scan = malloc(sizeof(struct scan_ctx));
+    if (!scan)
+	goto unwind0;
+
+    scan->buffer_size = 3 * (1<<20);
+    scan->buffer[0] = malloc(scan->buffer_size);
+    if (!scan->buffer[0])
+	goto unwind1;
+
+    scan->buffer[1] = scan->buffer[0] + scan->buffer_size/3;
+    scan->buffer[2] = scan->buffer[1] + scan->buffer_size/3;
+    scan->buffer_end = scan->buffer[0] + scan->buffer_size;
+    scan->p = scan->buffer[0];
+    scan->eof = 0;
+    scan->bytes_left = 0;
+    scan->source_offset = 0;
+
+    scan->window_size = 48;
+    scan->target_chunk_size = 1 << 16;
+    scan->minimum_chunk_size = 1 << 14;
+    scan->maximum_chunk_size = 1 << 18;
+    scan->rabin_ctx = rabin_init(1103515245, scan->window_size);
+    if (!scan->rabin_ctx)
+	goto unwind2;
+
+    return scan;
+
+unwind2:
+    rabin_free(scan->rabin_ctx);
+unwind1:
+    free(scan->buffer[0]);
+unwind0:
+    return 0;
+}
+
+void scan_set_fd(struct scan_ctx *scan, int fd) {
+    scan->fd = fd;
+}
+
+void scan_begin(struct scan_ctx *scan) {
+    start_aio(scan, scan->buffer[0]);
+    finish_aio(scan);
+    if (!scan->eof)
+	start_aio(scan, scan->buffer[1]);
+}
+
+int main(int argc, char **argv) {
+    struct scan_ctx *scan;
+    int fd;
+
+    scan = scan_init();
+    if (!scan) {
+	perror("scan_init");
+	return EXIT_FAILURE;
+    }
+
+    fd = open(argv[1], O_RDWR);
+    if (fd < 0) {
 	perror("open");
 	return EXIT_FAILURE;
     }
-    if (sqlite3_open(argv[2], &scan.db) != SQLITE_OK) {
-	print_sqlite3_error(scan.db);
+    scan_set_fd(scan, fd);
+    if (sqlite3_open(argv[2], &scan->db) != SQLITE_OK) {
+	print_sqlite3_error(scan->db);
 	return EXIT_FAILURE;
     }
 
-    if (sqlite3_exec(scan.db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) {
-	print_sqlite3_error(scan.db);
+    if (sqlite3_exec(scan->db, "BEGIN", NULL, NULL, NULL) != SQLITE_OK) {
+	print_sqlite3_error(scan->db);
 	return EXIT_FAILURE;
     }
 
-    if (sqlite3_prepare(scan.db, "INSERT INTO chunk (sha256, tag, offset, length) VALUES (?, ?, ?, ?)", -1, &scan.db_insert_stmt, NULL) != SQLITE_OK) {
-	print_sqlite3_error(scan.db);
+    if (sqlite3_prepare(scan->db, "INSERT INTO chunk (sha256, tag, offset, length) VALUES (?, ?, ?, ?)", -1, &scan->db_insert_stmt, NULL) != SQLITE_OK) {
+	print_sqlite3_error(scan->db);
 	return EXIT_FAILURE;
     }
 
-    if (sqlite3_bind_text(scan.db_insert_stmt, 2, argv[1], -1, SQLITE_STATIC)
+    if (sqlite3_bind_text(scan->db_insert_stmt, 2, argv[1], -1, SQLITE_STATIC)
 	    != SQLITE_OK) {
-	print_sqlite3_error(scan.db);
+	print_sqlite3_error(scan->db);
 	return EXIT_FAILURE;
     }
 
-    scan.buffer_size = 3 * (1<<20);
-    scan.buffer[0] = malloc(scan.buffer_size);
-    if (!scan.buffer[0]) {
-	perror("malloc");
-	return EXIT_FAILURE;
-    }
+    scan_begin(scan);
 
-    scan.buffer[1] = scan.buffer[0] + scan.buffer_size/3;
-    scan.buffer[2] = scan.buffer[1] + scan.buffer_size/3;
-    scan.buffer_end = scan.buffer[0] + scan.buffer_size;
-    scan.p = scan.buffer[0];
-    scan.eof = 0;
-    scan.bytes_left = 0;
-    scan.source_offset = 0;
+    scan->offset = 0;
 
-    start_aio(&scan, scan.buffer[0]);
-    finish_aio(&scan);
-    if (!scan.eof)
-	start_aio(&scan, scan.buffer[1]);
+    while (find_chunk_boundary(scan));
 
-    scan.window_size = 48;
-    scan.target_chunk_size = 1 << 16;
-    scan.minimum_chunk_size = 1 << 14;
-    scan.maximum_chunk_size = 1 << 18;
-    scan.rabin_ctx = rabin_init(1103515245, scan.window_size);
-    if (!scan.rabin_ctx) {
-	perror("rabin_init");
-	return EXIT_FAILURE;
-    }
+    sqlite3_finalize(scan->db_insert_stmt);
 
-    scan.offset = 0;
-
-    while (find_chunk_boundary(&scan));
-
-    sqlite3_finalize(scan.db_insert_stmt);
-
-    if (sqlite3_exec(scan.db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
-	print_sqlite3_error(scan.db);
+    if (sqlite3_exec(scan->db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
+	print_sqlite3_error(scan->db);
 	return EXIT_FAILURE;
     }
 
