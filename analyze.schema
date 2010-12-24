@@ -1,0 +1,1 @@
+CREATE TABLE chunk (sha256 text, tag text, offset integer, length integer);
