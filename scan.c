@@ -44,11 +44,32 @@ struct scan_ctx {
     int maximum_chunk_size;
 
     struct aiocb aiocb;
+    unsigned char *aio_destination;
 };
+
+static int retry_read(int fd, int *eof, unsigned char *p, int bytes_to_read) {
+    ssize_t result;
+    unsigned char *start, *end;
+
+    start = p;
+    end = p + bytes_to_read;
+    while (p < end) {
+	result = TEMP_FAILURE_RETRY(read(fd, p, end - p));
+	if (result < 0) {
+	    perror("read");
+	    abort();
+	} else if (!result) {
+	    *eof = 1;
+	    break;
+	}
+	p += result;
+    }
+    return p - start;
+}
 
 void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
     memset(&scan->aiocb, 0, sizeof(scan->aiocb));
-    scan->aiocb.aio_buf = buffer;
+    scan->aiocb.aio_buf = scan->aio_destination = buffer;
     scan->aiocb.aio_nbytes = scan->buffer_size / 3;
     scan->aiocb.aio_fildes = scan->fd;
     scan->aiocb.aio_offset = scan->source_offset;
@@ -60,6 +81,7 @@ void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
 
 void finish_aio(struct scan_ctx *scan) {
     int bytes_read;
+    off_t required_offset, lseek_result;
 
     const struct aiocb *cblist[1] = { &scan->aiocb };
     if (aio_suspend(cblist, 1, 0)) {
@@ -74,19 +96,28 @@ void finish_aio(struct scan_ctx *scan) {
     if (!bytes_read) {
 	scan->eof = 1;
 	return;
+    } else if (bytes_read != scan->buffer_size / 3) {
+	required_offset = scan->source_offset + bytes_read;
+	/* If we have been reading from a regular file, then the current
+	   offset will not match the data we have read in using aio_read,
+	   since that doesn't alter the offset, so we need to seek to the
+	   correct offset. However, we could have been reading from a pipe, in
+	   which case this lseek will fail because of ESPIPE, which is fine
+	   since there is no "offset" to be misaligned and we should
+	   still fill the buffer. Any other failure is an error */
+	lseek_result = lseek(scan->fd, required_offset, SEEK_SET);
+	if ((lseek_result == required_offset) ||
+		(lseek_result < 0 && errno == ESPIPE))
+	    bytes_read += retry_read(scan->fd, &scan->eof,
+				     scan->aio_destination + bytes_read,
+				     scan->buffer_size / 3 - bytes_read);
+	else
+	    abort();
     }
 
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
-
-    /* Currently no handling of short aio_read */
-    if (bytes_read != scan->buffer_size / 3) {
-	/* Check that we really have EOF and not some other reason for the
-	   short read */
-	assert(lseek(scan->fd, SEEK_SET, scan->source_offset) == (off_t)-1 && errno == EINVAL);
-	scan->eof = 1;
-    }
 }
 
 static inline void read_more_data(struct scan_ctx *scan) {
