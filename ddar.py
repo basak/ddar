@@ -140,16 +140,18 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
 
     def load(self, tag, f=sys.stdout):
         cursor = self.db.cursor()
-        cursor.execute('SELECT id FROM archive WHERE name=?', (tag,))
+        cursor.execute('SELECT id, hash FROM archive WHERE name=?', (tag,))
         row = cursor.fetchone()
         if not row:
             raise RuntimeError('member %s not found in archive' % tag)
 
-        archive_id = row[0]
+        archive_id, h = row
+        expected_h = str(h)
         cursor.execute('SELECT hash, offset, length ' +
                        'FROM chunk WHERE archive_id=? ' +
                        'ORDER BY offset', (archive_id,))
 
+        h2 = hashlib.sha256()
         next_offset = 0
         row = cursor.fetchone()
         while row:
@@ -158,10 +160,14 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
             with open(self._object_filename(h), 'rb') as g:
                 data = g.read()
             assert(len(data) == length)
+            h2.update(data)
             f.write(data)
 
             next_offset = offset + length
             row = cursor.fetchone()
+
+        if expected_h != h2.digest():
+            raise RuntimeError('Extracted archive failed hash check')
 
     def delete(self, tag):
         cursor = self.db.cursor()
