@@ -45,7 +45,10 @@ struct scan_ctx {
     int maximum_chunk_size;
 
     struct aiocb aiocb;
-    unsigned char *aio_destination;
+    unsigned char *io_destination;
+
+    void (*start_io)(struct scan_ctx *, unsigned char *);
+    void (*finish_io)(struct scan_ctx *);
 
     jmp_buf jmp_env;
 };
@@ -70,9 +73,22 @@ static int retry_read(struct scan_ctx *scan, unsigned char *p,
     return p - start;
 }
 
-void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
+static void start_sync_io(struct scan_ctx *scan, unsigned char *buffer) {
+    scan->io_destination = buffer;
+}
+
+static void finish_sync_io(struct scan_ctx *scan) {
+    int bytes_read;
+
+    bytes_read = retry_read(scan, scan->io_destination, scan->buffer_size / 3);
+    posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+    scan->source_offset += bytes_read;
+    scan->bytes_left += bytes_read;
+}
+
+static void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
     memset(&scan->aiocb, 0, sizeof(scan->aiocb));
-    scan->aiocb.aio_buf = scan->aio_destination = buffer;
+    scan->aiocb.aio_buf = scan->io_destination = buffer;
     scan->aiocb.aio_nbytes = scan->buffer_size / 3;
     scan->aiocb.aio_fildes = scan->fd;
     scan->aiocb.aio_offset = scan->source_offset;
@@ -81,7 +97,7 @@ void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
     }
 }
 
-void finish_aio(struct scan_ctx *scan) {
+static void finish_aio(struct scan_ctx *scan) {
     int bytes_read;
     off_t required_offset, lseek_result;
 
@@ -109,7 +125,7 @@ void finish_aio(struct scan_ctx *scan) {
 	if ((lseek_result == required_offset) ||
 		(lseek_result < 0 && errno == ESPIPE))
 	    bytes_read += retry_read(scan,
-				     scan->aio_destination + bytes_read,
+				     scan->io_destination + bytes_read,
 				     scan->buffer_size / 3 - bytes_read);
 	else
 	    longjmp(scan->jmp_env, 1);
@@ -141,10 +157,10 @@ static inline void read_more_data(struct scan_ctx *scan) {
     else if (head == scan->buffer[2])
 	readahead_buffer = scan->buffer[0];
 
-    finish_aio(scan);
+    scan->finish_io(scan);
 
     if (!scan->eof)
-	start_aio(scan, readahead_buffer);
+	scan->start_io(scan, readahead_buffer);
 }
 
 static inline void boundary_hit(struct scan_ctx *scan, unsigned char *boundary,
@@ -279,6 +295,9 @@ struct scan_ctx *scan_init(void) {
     if (!scan->rabin_ctx)
 	goto unwind2;
 
+    scan->start_io = start_sync_io;
+    scan->finish_io = finish_sync_io;
+
     return scan;
 
 unwind2:
@@ -299,14 +318,19 @@ void scan_set_fd(struct scan_ctx *scan, int fd) {
     scan->fd = fd;
 }
 
+void scan_set_aio(struct scan_ctx *scan) {
+    scan->start_io = start_aio;
+    scan->finish_io = finish_aio;
+}
+
 int scan_begin(struct scan_ctx *scan) {
     if (setjmp(scan->jmp_env))
 	return 0;
 
-    start_aio(scan, scan->buffer[0]);
-    finish_aio(scan);
+    scan->start_io(scan, scan->buffer[0]);
+    scan->finish_io(scan);
     if (!scan->eof)
-	start_aio(scan, scan->buffer[1]);
+	scan->start_io(scan, scan->buffer[1]);
 
     return 1;
 }

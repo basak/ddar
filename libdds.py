@@ -13,6 +13,7 @@ for name, restype, argtypes in [
     ( 'scan_init', c_void_p, [] ),
     ( 'scan_free', None, [ c_void_p ] ),
     ( 'scan_set_fd', None, [ c_void_p, c_int ] ),
+    ( 'scan_set_aio', None, [ c_void_p ] ),
     ( 'scan_begin', c_int, [ c_void_p ] ),
     ( 'scan_read_chunk', c_int, [ c_void_p, POINTER(scan_chunk_data) ] ),
         ]:
@@ -34,6 +35,9 @@ class DDS(object):
 
     def set_file(self, f):
         self.set_fd(f.fileno())
+
+    def set_aio(self):
+        libdds.scan_set_aio(self.h)
 
     def begin(self):
         if not libdds.scan_begin(self.h):

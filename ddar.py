@@ -94,7 +94,7 @@ CREATE TABLE chunk (tag TEXT NOT NULL,
         cursor.execute('INSERT INTO chunk (tag, hash, offset, length) ' +
                        'VALUES (?, ?, ?, ?)', (tag, h_blob, offset, length))
 
-    def store(self, tag, f=sys.stdin):
+    def store(self, tag, f=sys.stdin, aio=False):
         cursor = self.db.cursor()
 
         cursor.execute('SELECT 1 FROM chunk WHERE tag=? LIMIT 1', (tag,))
@@ -103,6 +103,8 @@ CREATE TABLE chunk (tag TEXT NOT NULL,
 
         d = libdds.DDS()
         d.set_file(f)
+        if aio:
+            d.set_aio()
         d.begin()
 
         try:
@@ -276,7 +278,7 @@ def main_add_one(store, filename, tag):
         store.store(tag, sys.stdin)
     else:
         with open(filename, 'rb') as f:
-            store.store(tag, f)
+            store.store(tag, f, aio=True)
 
 def main_add(store, members, name=None):
     for member in members:

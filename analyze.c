@@ -146,6 +146,7 @@ int main(int argc, char **argv) {
 	return EXIT_FAILURE;
     }
     scan_set_fd(scan, fd);
+    scan_set_aio(scan);
 
     if (!scan_begin(scan))
 	return EXIT_FAILURE;
