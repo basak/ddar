@@ -79,6 +79,21 @@ CREATE TABLE chunk (tag TEXT NOT NULL,
     def _format_filename(self, n):
         return os.path.join(self.dirname, 'format', n)
 
+    def _store_chunk(self, tag, cursor, data, offset, length):
+        '''Store the chunk in the database and the object store if necessary,
+        but do not commit. The database insert is done last, so that if
+        interrupted the database is never wrong. At worst a dangling object
+        will be left in the object store.'''
+
+        h = hashlib.sha256(data).digest()
+        h_blob = buffer(h) # buffer to make sqlite use a BLOB
+        cursor.execute('SELECT 1 FROM chunk WHERE hash=?', (h_blob,))
+        if not cursor.fetchone():
+            with open(self._object_filename(h), 'wb') as f:
+                f.write(data)
+        cursor.execute('INSERT INTO chunk (tag, hash, offset, length) ' +
+                       'VALUES (?, ?, ?, ?)', (tag, h_blob, offset, length))
+
     def store(self, tag, f=sys.stdin):
         cursor = self.db.cursor()
 
@@ -90,24 +105,15 @@ CREATE TABLE chunk (tag TEXT NOT NULL,
         d.set_file(f)
         d.begin()
 
-        offset = 0
-        for data in d.chunks():
-            h = hashlib.sha256(data).digest()
-            h_blob = buffer(h) # buffer to make sqlite use a BLOB
-            cursor.execute('SELECT 1 FROM chunk WHERE hash=?', (h_blob,))
-            if not cursor.fetchone():
-                filename = self._object_filename(h)
-                assert(not os.path.exists(filename))
-                if not os.path.exists(filename):
-                    with open(filename, 'wb') as f:
-                        f.write(data)
-            l = len(data)
-            cursor.execute('INSERT INTO chunk (tag, hash, offset, length) ' +
-                           'VALUES (?, ?, ?, ?)', (tag, h_blob, offset, l))
-            offset += l
-
-        cursor.close()
-        self.db.commit()
+        try:
+            offset = 0
+            for data in d.chunks():
+                length = len(data)
+                self._store_chunk(tag, cursor, data, offset, length)
+                offset += length
+        finally:
+            cursor.close()
+            self.db.commit()
 
     def load(self, tag, f=sys.stdout):
         cursor = self.db.cursor()
