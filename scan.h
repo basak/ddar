@@ -14,7 +14,7 @@ struct scan_chunk_data {
 struct scan_ctx *scan_init(void);
 void scan_free(struct scan_ctx *);
 void scan_set_fd(struct scan_ctx *, int);
-void scan_begin(struct scan_ctx *);
+int scan_begin(struct scan_ctx *);
 int scan_read_chunk(struct scan_ctx *, struct scan_chunk_data *);
 
 #endif

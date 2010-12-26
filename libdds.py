@@ -13,7 +13,7 @@ for name, restype, argtypes in [
     ( 'scan_init', c_void_p, [] ),
     ( 'scan_free', None, [ c_void_p ] ),
     ( 'scan_set_fd', None, [ c_void_p, c_int ] ),
-    ( 'scan_begin', None, [ c_void_p ] ),
+    ( 'scan_begin', c_int, [ c_void_p ] ),
     ( 'scan_read_chunk', c_int, [ c_void_p, POINTER(scan_chunk_data) ] ),
         ]:
     libdds[name].restype = restype
@@ -36,7 +36,8 @@ class DDS(object):
         self.set_fd(f.fileno())
 
     def begin(self):
-        libdds.scan_begin(self.h)
+        if not libdds.scan_begin(self.h):
+            raise RuntimeError('libdds error')
 
     def chunks(self):
         chunk_data = (scan_chunk_data * 2)()

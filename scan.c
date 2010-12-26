@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <aio.h>
 #include <string.h>
+#include <setjmp.h>
 
 #include "rabin.h"
 
@@ -45,21 +46,23 @@ struct scan_ctx {
 
     struct aiocb aiocb;
     unsigned char *aio_destination;
+
+    jmp_buf jmp_env;
 };
 
-static int retry_read(int fd, int *eof, unsigned char *p, int bytes_to_read) {
+static int retry_read(struct scan_ctx *scan, unsigned char *p,
+		      int bytes_to_read) {
     ssize_t result;
     unsigned char *start, *end;
 
     start = p;
     end = p + bytes_to_read;
     while (p < end) {
-	result = TEMP_FAILURE_RETRY(read(fd, p, end - p));
+	result = TEMP_FAILURE_RETRY(read(scan->fd, p, end - p));
 	if (result < 0) {
-	    perror("read");
-	    abort();
+	    longjmp(scan->jmp_env, 1);
 	} else if (!result) {
-	    *eof = 1;
+	    scan->eof = 1;
 	    break;
 	}
 	p += result;
@@ -74,8 +77,7 @@ void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
     scan->aiocb.aio_fildes = scan->fd;
     scan->aiocb.aio_offset = scan->source_offset;
     if (aio_read(&scan->aiocb)) {
-	perror("aio_read");
-	abort();
+	longjmp(scan->jmp_env, 1);
     }
 }
 
@@ -85,12 +87,10 @@ void finish_aio(struct scan_ctx *scan) {
 
     const struct aiocb *cblist[1] = { &scan->aiocb };
     if (TEMP_FAILURE_RETRY(aio_suspend(cblist, 1, 0))) {
-	perror("aio_suspend");
-	abort();
+	longjmp(scan->jmp_env, 1);
     }
     if (aio_error(&scan->aiocb)) {
-	perror("aio_error");
-	abort();
+	longjmp(scan->jmp_env, 1);
     }
     bytes_read = aio_return(&scan->aiocb);
     if (!bytes_read) {
@@ -108,11 +108,11 @@ void finish_aio(struct scan_ctx *scan) {
 	lseek_result = lseek(scan->fd, required_offset, SEEK_SET);
 	if ((lseek_result == required_offset) ||
 		(lseek_result < 0 && errno == ESPIPE))
-	    bytes_read += retry_read(scan->fd, &scan->eof,
+	    bytes_read += retry_read(scan,
 				     scan->aio_destination + bytes_read,
 				     scan->buffer_size / 3 - bytes_read);
 	else
-	    abort();
+	    longjmp(scan->jmp_env, 1);
     }
 
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
@@ -170,6 +170,9 @@ int scan_read_chunk(struct scan_ctx *scan,
     int current_chunk_size;
     int temp;
     unsigned char *old;
+
+    if (setjmp(scan->jmp_env))
+	return 0;
 
     if (unlikely(scan->bytes_left <= scan->minimum_chunk_size)) {
 	if (unlikely(scan->eof)) {
@@ -296,11 +299,16 @@ void scan_set_fd(struct scan_ctx *scan, int fd) {
     scan->fd = fd;
 }
 
-void scan_begin(struct scan_ctx *scan) {
+int scan_begin(struct scan_ctx *scan) {
+    if (setjmp(scan->jmp_env))
+	return 0;
+
     start_aio(scan, scan->buffer[0]);
     finish_aio(scan);
     if (!scan->eof)
 	start_aio(scan, scan->buffer[1]);
+
+    return 1;
 }
 
 /* vim: set ts=8 sw=4 sts=4 cindent : */

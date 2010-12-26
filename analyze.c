@@ -147,14 +147,15 @@ int main(int argc, char **argv) {
     }
     scan_set_fd(scan, fd);
 
-    scan_begin(scan);
+    if (!scan_begin(scan))
+	return EXIT_FAILURE;
     do {
 	result = scan_read_chunk(scan, chunk_data);
 	if (result & SCAN_CHUNK_FOUND)
 	    store_chunk(analyze, chunk_data);
 	else {
 	    fputs("Scan error\n", stderr);
-	    break;
+	    return EXIT_FAILURE;
 	}
     } while (!(result & SCAN_CHUNK_LAST));
     analyze_close(analyze);
