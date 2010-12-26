@@ -23,23 +23,20 @@ static void print_sqlite3_error(sqlite3 *db) {
     fputc('\n', stderr);
 }
 
-/* boundary points to where the next chunk would be; going backwards to find
- * the start point may involve wrapping around the circular buffer */
-static void boundary_hit(unsigned char *buf1, int buf1_size,
-			 unsigned char *buf2, int buf2_size,
-			 void *data) {
-    struct analyze_ctx *analyze = (struct analyze_ctx *)data;
-
+static void store_chunk(struct analyze_ctx *analyze,
+			const struct scan_chunk_data *chunk_data) {
+    int i;
     sha256_ctx sha256;
     unsigned char sha256_digest[32];
     char sha256_digest_string[65];
-    int chunk_size = buf1_size + buf2_size;
+    int chunk_size = 0;
 
     sha256_init(&sha256);
-    if (buf1 && buf1_size)
-	sha256_update(&sha256, buf1, buf1_size);
-    if (buf2 && buf2_size)
-	sha256_update(&sha256, buf2, buf2_size);
+    for (i=0; i<2; i++) {
+	chunk_size +=  chunk_data[i].size;
+	if (chunk_data[i].buf && chunk_data[i].size)
+	    sha256_update(&sha256, chunk_data[i].buf, chunk_data[i].size);
+    }
     sha256_final(&sha256, sha256_digest);
     sprintf(sha256_digest_string, "%016" PRIx64
 	                          "%016" PRIx64
@@ -127,8 +124,9 @@ void analyze_close(struct analyze_ctx *analyze) {
 
 int main(int argc, char **argv) {
     struct scan_ctx *scan;
+    struct scan_chunk_data chunk_data[2];
     struct analyze_ctx *analyze;
-    int fd;
+    int fd, result;
 
     analyze = analyze_open(argv[2], argv[1]);
     if (!analyze) {
@@ -150,7 +148,15 @@ int main(int argc, char **argv) {
     scan_set_fd(scan, fd);
 
     scan_begin(scan);
-    while (scan_find_chunk_boundary(scan, boundary_hit, analyze));
+    do {
+	result = scan_read_chunk(scan, chunk_data);
+	if (result & SCAN_CHUNK_FOUND)
+	    store_chunk(analyze, chunk_data);
+	else {
+	    fputs("Scan error\n", stderr);
+	    break;
+	}
+    } while (!(result & SCAN_CHUNK_LAST));
     analyze_close(analyze);
     scan_free(scan);
 

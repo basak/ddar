@@ -86,8 +86,12 @@ CREATE TABLE chunk (tag TEXT NOT NULL,
         if cursor.fetchone():
             raise RuntimeError("archive %s already exists" % tag)
 
-        offset = [0]
-        def cb(data):
+        d = libdds.DDS()
+        d.set_file(f)
+        d.begin()
+
+        offset = 0
+        for data in d.chunks():
             h = hashlib.sha256(data).digest()
             h_blob = buffer(h) # buffer to make sqlite use a BLOB
             cursor.execute('SELECT 1 FROM chunk WHERE hash=?', (h_blob,))
@@ -99,13 +103,9 @@ CREATE TABLE chunk (tag TEXT NOT NULL,
                         f.write(data)
             l = len(data)
             cursor.execute('INSERT INTO chunk (tag, hash, offset, length) ' +
-                           'VALUES (?, ?, ?, ?)', (tag, h_blob, offset[0], l))
-            offset[0] += l
+                           'VALUES (?, ?, ?, ?)', (tag, h_blob, offset, l))
+            offset += l
 
-        d = libdds.DDS()
-        d.set_file(f)
-        d.begin()
-        while d.find_chunk_boundary(cb): pass
         cursor.close()
         self.db.commit()
 

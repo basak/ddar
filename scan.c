@@ -148,26 +148,24 @@ static inline void read_more_data(struct scan_ctx *scan) {
 }
 
 static inline void boundary_hit(struct scan_ctx *scan, unsigned char *boundary,
-	int chunk_size, scan_boundary_cb_fn_t *boundary_cb_fn,
-	void *boundary_cb_data) {
+	int chunk_size, struct scan_chunk_data *chunk_data) {
     if (scan->buffer[0] + chunk_size > boundary) {
 	/* chunk is wrapped */
-	boundary_cb_fn(boundary + scan->buffer_size - chunk_size,
-		       chunk_size - (boundary - scan->buffer[0]),
-		       scan->buffer[0],
-		       boundary - scan->buffer[0],
-		       boundary_cb_data);
+	chunk_data[0].buf = boundary + scan->buffer_size - chunk_size;
+	chunk_data[0].size = chunk_size - (boundary - scan->buffer[0]);
+	chunk_data[1].buf = scan->buffer[0];
+	chunk_data[1].size = boundary - scan->buffer[0];
     } else {
 	/* chunk is not wrapped */
-	boundary_cb_fn(boundary - chunk_size, chunk_size, 0, 0,
-		       boundary_cb_data);
+	chunk_data[0].buf = boundary - chunk_size;
+	chunk_data[0].size =	chunk_size;
+	chunk_data[1].buf = 0;
+	chunk_data[1].size = 0;
     }
 }
 
-/* Returns 1 for go-again, 0 for EOF reached */
-int scan_find_chunk_boundary(struct scan_ctx *scan,
-			     scan_boundary_cb_fn_t *boundary_cb_fn,
-			     void *boundary_cb_data) {
+int scan_read_chunk(struct scan_ctx *scan,
+		    struct scan_chunk_data *chunk_data) {
     uint32_t hash;
     int current_chunk_size;
     int temp;
@@ -176,16 +174,16 @@ int scan_find_chunk_boundary(struct scan_ctx *scan,
     if (unlikely(scan->bytes_left <= scan->minimum_chunk_size)) {
 	if (unlikely(scan->eof)) {
 	    boundary_hit(scan, scan->p + scan->bytes_left, scan->bytes_left,
-		         boundary_cb_fn, boundary_cb_data);
-	    return 0;
+		         chunk_data);
+	    return SCAN_CHUNK_FOUND | SCAN_CHUNK_LAST;
 	} else {
 	    read_more_data(scan);
 	    /* Check again in case of EOF */
 	    if (unlikely(scan->bytes_left <= scan->minimum_chunk_size)) {
 		assert(scan->eof);
 		boundary_hit(scan, scan->p + scan->bytes_left,
-			scan->bytes_left, boundary_cb_fn, boundary_cb_data);
-		return 0;
+			scan->bytes_left, chunk_data);
+		return SCAN_CHUNK_FOUND | SCAN_CHUNK_LAST;
 	    }
 	}
     }
@@ -219,22 +217,22 @@ int scan_find_chunk_boundary(struct scan_ctx *scan,
 	    /* Hash has matched to a boundary, or we have got to the maximum
 	     * chunk size */
 	    boundary_hit(scan, scan->p, current_chunk_size,
-			 boundary_cb_fn, boundary_cb_data);
-	    return 1;
+			 chunk_data);
+	    return SCAN_CHUNK_FOUND;
 	} else {
 	    /* Move up and calculate the next hash */
 	    if (unlikely(!scan->bytes_left)) {
 		if (unlikely(scan->eof)) {
 		    boundary_hit(scan, scan->p, current_chunk_size,
-				 boundary_cb_fn, boundary_cb_data);
-		    return 0;
+				 chunk_data);
+		    return SCAN_CHUNK_FOUND | SCAN_CHUNK_LAST;
 		}
 		read_more_data(scan);
 		if (unlikely(!scan->bytes_left)) {
 		    assert(scan->eof);
 		    boundary_hit(scan, scan->p, current_chunk_size,
-				 boundary_cb_fn, boundary_cb_data);
-		    return 0;
+				 chunk_data);
+		    return SCAN_CHUNK_FOUND | SCAN_CHUNK_LAST;
 		}
 	    }
 	    hash = rabin_hash_next(scan->rabin_ctx, hash, *old, *scan->p);

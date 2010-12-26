@@ -1,24 +1,26 @@
 #!/usr/bin/python
 
-from ctypes import c_void_p, c_int, c_char, POINTER, CFUNCTYPE
-import ctypes
+from ctypes import byref, CDLL, c_void_p, c_int, c_char, POINTER, string_at
+from ctypes import Structure
 
-libdds = ctypes.CDLL('libdds.so.0')
+libdds = CDLL('libdds.so.0')
 
-scan_boundary_cb_fn_t = CFUNCTYPE(None, POINTER(c_char), c_int,
-                                        POINTER(c_char), c_int,
-                                        c_void_p)
+class scan_chunk_data(Structure):
+    _fields_ = [ ('buf', c_void_p),
+                 ('size', c_int) ]
 
 for name, restype, argtypes in [
     ( 'scan_init', c_void_p, [] ),
     ( 'scan_free', None, [ c_void_p ] ),
     ( 'scan_set_fd', None, [ c_void_p, c_int ] ),
     ( 'scan_begin', None, [ c_void_p ] ),
-    ( 'scan_find_chunk_boundary', c_int, [ c_void_p, scan_boundary_cb_fn_t,
-                                           c_void_p ] ),
+    ( 'scan_read_chunk', c_int, [ c_void_p, POINTER(scan_chunk_data) ] ),
         ]:
     libdds[name].restype = restype
     libdds[name].argtypes = argtypes
+
+SCAN_CHUNK_FOUND = 1
+SCAN_CHUNK_LAST = 2
 
 class DDS(object):
     def __init__(self):
@@ -36,19 +38,22 @@ class DDS(object):
     def begin(self):
         libdds.scan_begin(self.h)
 
-    def find_chunk_boundary(self, cb):
-        def _cb(buf1, buf1_size, buf2, buf2_size, data):
-            if buf1_size:
-                buf1 = ctypes.string_at(buf1, buf1_size)
-            else:
-                buf1 = ''
-            if buf2_size:
-                buf2 = ctypes.string_at(buf2, buf2_size)
-            else:
-                buf2 = ''
+    def chunks(self):
+        chunk_data = (scan_chunk_data * 2)()
 
-            cb(buf1 + buf2)
+        while True:
+            result = libdds.scan_read_chunk(self.h, chunk_data)
+            if not (result & SCAN_CHUNK_FOUND):
+                raise RuntimeError('libdds error')
 
-        return libdds.scan_find_chunk_boundary(self.h, scan_boundary_cb_fn_t(_cb), None)
+            data = []
+            for segment in chunk_data:
+                if segment.buf and segment.size:
+                    data.append(string_at(segment.buf, segment.size))
+            
+            yield ''.join(data)
+
+            if result & SCAN_CHUNK_LAST:
+                break
 
 # vim: set ts=8 sts=4 sw=4 ai et :

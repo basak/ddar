@@ -2,16 +2,21 @@
 #define SCAN_H
 
 struct scan_ctx;
-typedef void scan_boundary_cb_fn_t (unsigned char *, int, unsigned char *, int,
-			       void *);
+
+struct scan_chunk_data {
+    unsigned char *buf;
+    int size;
+};
+
+#define SCAN_CHUNK_FOUND 1
+#define SCAN_CHUNK_LAST  2
 
 struct scan_ctx *scan_init(void);
 void scan_free(struct scan_ctx *);
 void scan_set_fd(struct scan_ctx *, int);
 void scan_begin(struct scan_ctx *);
-int scan_find_chunk_boundary(struct scan_ctx *,
-			     scan_boundary_cb_fn_t *, void *);
+int scan_read_chunk(struct scan_ctx *, struct scan_chunk_data *);
 
 #endif
 
-/* vim: set ts=8 sts=4 cindent : */
+/* vim: set ts=8 sw=4 sts=4 cindent : */
