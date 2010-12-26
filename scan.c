@@ -84,7 +84,7 @@ void finish_aio(struct scan_ctx *scan) {
     off_t required_offset, lseek_result;
 
     const struct aiocb *cblist[1] = { &scan->aiocb };
-    if (aio_suspend(cblist, 1, 0)) {
+    if (TEMP_FAILURE_RETRY(aio_suspend(cblist, 1, 0))) {
 	perror("aio_suspend");
 	abort();
     }
