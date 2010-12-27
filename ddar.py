@@ -383,7 +383,7 @@ def parse_args(args):
     pos_args = []
     pos_arg_names = [ 'member' ]
 
-    bool_options = set('ctxd') | set(['fsck'])
+    bool_options = set('ctxd') | set([ 'fsck', 'force-stdout' ])
     arg_options = set([ 'f', 'L' ])
     command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
 
@@ -519,6 +519,8 @@ def main():
         if args['c']:
             main_add(store, args['member'], args['L'])
         elif args['x']:
+            if not args['force-stdout'] and os.isatty(sys.stdout.fileno()):
+                raise OptionError('output is a terminal and --force-stdout not specified')
             main_extract(store, args['member'])
         elif args['d']:
             for member in args['member']:
@@ -542,8 +544,11 @@ Create or add to an archive:
     current date.
 
 Extract from an archive:
-    ddar [-]x [-f] archive > file  # extract the most recent member
-    ddar [-]x [-f] archive member-name > file
+    ddar [-]x [options] [-f] archive > file  # extract the most recent member
+    ddar [-]x [options] [-f] archive member-name > file
+
+    Options:
+        --force-stdout  Write to stdout even if stdout is a terminal
 
 List members in an archive:
     ddar [-]t [-f] archive
