@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import argparse, binascii, errno, hashlib, os, os.path, stat, string, sqlite3
-import sys, time
+import sys, tempfile, time
 
 import libdds
 
@@ -81,7 +81,15 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
         db.close()
 
     def _object_filename(self, h):
-        return os.path.join(self.dirname, 'objects', binascii.hexlify(h))
+        h = binascii.hexlify(h)
+        return os.path.join(self.dirname, 'objects', h[0:2], h[2:])
+
+    def _makedirs(self, object_filename):
+        try:
+            os.makedirs(os.path.dirname(object_filename))
+        except OSError, e:
+            if e.errno != errno.EEXIST:
+                raise
 
     def _format_filename(self, n):
         return os.path.join(self.dirname, 'format', n)
@@ -96,8 +104,15 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
         h_blob = buffer(h) # buffer to make sqlite use a BLOB
         cursor.execute('SELECT 1 FROM chunk WHERE hash=?', (h_blob,))
         if not cursor.fetchone():
-            with open(self._object_filename(h), 'wb') as f:
-                f.write(data)
+            object_filename = self._object_filename(h)
+            object_dir = os.path.dirname(object_filename)
+            self._makedirs(object_filename)
+            temp = tempfile.NamedTemporaryFile(dir=object_dir, delete=False)
+            try:
+                temp.write(data)
+            finally:
+                temp.close()
+            os.rename(temp.name, object_filename)
         cursor.execute('INSERT INTO chunk ' +
                        '(archive_id, hash, offset, length) ' +
                        'VALUES (?, ?, ?, ?)',
@@ -186,7 +201,9 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
                             'archive_id != ? LIMIT 1', (h, archive_id))
             if not cursor2.fetchone():
                 try:
-                    os.unlink(self._object_filename(h))
+                    object_filename = self._object_filename(h)
+                    os.unlink(object_filename)
+                    os.removedirs(os.path.dirname(object_filename))
                 except OSError, e:
                     # ignore ENOENT to make delete idempotent on a SIGINT
                     if e.errno != errno.ENOENT:
