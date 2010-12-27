@@ -506,7 +506,10 @@ def main():
         if not any((args[k] for k in (list('cxtd') + ['fsck']))):
             raise OptionError('a command is required')
         if not args['f']:
-            raise OptionError('an archive must be specified')
+            try:
+                args['f'] = args['member'].pop(0)
+            except IndexError:
+                raise OptionError('an archive must be specified')
         if args['d'] and not args['member']:
             raise OptionError('no member specified')
         if args['L'] and not args['c']:
@@ -530,26 +533,26 @@ def main():
         print '''ddar: store multiple files efficiently in a de-duplicated archive
 
 Create or add to an archive:
-    ddar [-]c -f archive [-L member-name] < file
-    ddar [-]c -f archive [-L member-name] member
-    ddar [-]c -f archive member [member...]
+    ddar [-]c [-f] archive [-L member-name] < file
+    ddar [-]c [-f] archive [-L member-name] member
+    ddar [-]c [-f] archive member [member...]
 
     If member-name is unspecified, ddar will use the supplied filename
     as the member name, or for stdin create a suitable name based on the
     current date.
 
 Extract from an archive:
-    ddar [-]x -f archive > file  # extract the most recent member
-    ddar [-]x -f archive member-name > file
+    ddar [-]x [-f] archive > file  # extract the most recent member
+    ddar [-]x [-f] archive member-name > file
 
 List members in an archive:
-    ddar [-]t -f archive
+    ddar [-]t [-f] archive
 
 Delete members from an archive:
-    ddar [-]d -f archive member-name [member-name...]
+    ddar [-]d [-f] archive member-name [member-name...]
 
 Check an archive for integrity:
-    ddar --fsck -f archive
+    ddar --fsck [-f] archive
 
 
 Examples:
