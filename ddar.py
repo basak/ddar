@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import argparse, binascii, errno, hashlib, os, os.path, stat, string, sqlite3
-import sys
+import sys, time
 
 import libdds
 
@@ -205,6 +205,38 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
             yield tag[0]
             tag = cursor.fetchone()
 
+    def get_last_tag(self):
+        cursor = self.db.cursor()
+        cursor.execute('SELECT name FROM archive ORDER BY rowid DESC LIMIT 1')
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def suggest_tag(self):
+        cursor = self.db.cursor()
+        base = time.strftime('%Y-%m-%d')
+        cursor.execute('SELECT 1 FROM archive WHERE name=?', (base,))
+        if not cursor.fetchone():
+            return base
+        root_like = base + '-%'
+        cursor.execute('SELECT COUNT(*) FROM archive WHERE name LIKE ?',
+                       (root_like,))
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return '%s-2' % base
+
+        suffix = row[0] + 1
+
+        cursor.execute('SELECT 1 FROM archive WHERE name=?',
+                       ('%s-%s' % (base, suffix),))
+        row = cursor.fetchone()
+        while row:
+            suffix += 1
+            cursor.execute('SELECT 1 FROM archive WHERE name=?',
+                           ('%s-%s' % (base, suffix),))
+            row = cursor.fetchone()
+
+        return '%s-%s' % (base, suffix)
+
     hexdigits = set(string.hexdigits) - set(string.uppercase)
     sha256_length = len(hashlib.sha256().hexdigest())
 
@@ -334,41 +366,113 @@ WHERE
         self._fsck_db_to_fs_chunk()
         self._fsck_db_to_fs_archive()
 
-def parse_args():
-    # The argument parser options are modelled after GNU ar
-    parser = argparse.ArgumentParser(prog='ddar')
+class OptionError(RuntimeError):
+    def __init__(self, m):
+        self.message = m
 
-    parser.add_argument('--name', dest='name',
-                        help='use NAME for first stored member name')
-    parser.add_argument('-o', dest='output_name', metavar='NAME',
-                        help="use NAME as output destination ('-' for stdout)")
-    group = parser.add_mutually_exclusive_group(required=True)
+class OptionHelpRequest(Exception): pass
 
-    group.add_argument('-r', '-q', dest='add', action='store_true',
-                       help='add members to archive')
-    group.add_argument('-t', dest='list', action='store_true',
-                       help='list archive contents')
-    group.add_argument('-x', dest='extract', action='store_true',
-                       help='extract members from archive')
-    group.add_argument('-d', dest='delete', action='store_true',
-                       help='delete members from archive')
-    group.add_argument('--fsck', dest='fsck', action='store_true',
-                       help='check archive for errors')
+def parse_args(args):
+    # The argument parser options are modelled after GNU ar, tar, gzip and
+    # tarsnap. The aim is to not confuse or annoy anyone already familiar with
+    # those tools by behaving as one would expect. Unfortunately I can't seem
+    # to find a way to make this happen using argparse, optparse or getopt, so
+    # doing it by hand it is.
 
-    parser.add_argument('archive', help='ddar archive directory')
-    parser.add_argument('member', nargs='*',
-                        help='file to store (add) or retrieve (extract)')
+    result = {}
+    pos_args = []
+    pos_arg_names = [ 'member' ]
 
-    # Hack to make first hyphen optional (like GNU ar)
+    bool_options = set('ctxd') | set(['fsck'])
+    arg_options = set([ 'f', 'L' ])
+    command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
+
+    all_options = bool_options | arg_options | command_options
+    single_letter_options = set([x for x in all_options if len(x) == 1])
+    long_options = set([x for x in all_options if len(x) > 1])
+
+    def set_result(k, v):
+        if k in command_options and any((k in result for k in command_options)):
+            raise OptionError('only one command option may be specified')
+        result[k] = v
+
+    def parse_long_option(arg_iter, arg):
+        arg = arg.lstrip('-')
+
+        if arg == 'help':
+            raise OptionHelpRequest()
+
+        if arg in arg_options:
+            set_result(arg, arg_iter.next())
+        elif arg in bool_options:
+            set_result(arg, True)
+        else:
+            raise OptionError('unknown option: %s' % arg)
+
+    def parse_option_cluster(arg_iter, arg):
+        arg = arg.lstrip('-')
+        while arg:
+            if arg[0] in single_letter_options:
+                if arg[0] in arg_options:
+                    if len(arg) == 1:
+                        set_result(arg[0], arg_iter.next())
+                    else:
+                        set_result(arg[0], arg[1:])
+                    return
+                elif arg[0] in bool_options:
+                    set_result(arg[0], True)
+                    arg = arg[1:]
+                    continue
+                else:
+                    raise NotImplementedError()
+            elif arg[0] == 'h':
+                raise OptionHelpRequest()
+            else:
+                raise OptionError('unknown option: %s' % arg[0])
+
+    arg_iter = iter(args)
+    first = True
+    while True:
+        try:
+            arg = arg_iter.next()
+        except StopIteration:
+            break
+        if first and not arg.startswith('--'):
+            # First arg is always the command even without a '-', like ps
+            # and tar do it, unless it is a long option
+            parse_option_cluster(arg_iter, arg)
+        elif arg == '--':
+            # Remaining args are all positional
+            pos_args.extend(arg_iter)
+            break
+        elif not arg:
+            # An empty arg? I guess it's positional
+            pos_args.append(arg)
+        elif arg == '-':
+            # This is a positional arg too
+            pos_args.append(arg)
+        elif arg.startswith('--'):
+            parse_long_option(arg_iter, arg)
+        elif arg.startswith('-'):
+            parse_option_cluster(arg_iter, arg)
+        else:
+            pos_args.append(arg)
+        first = False
+
+    result.update(zip(pos_arg_names, pos_args))
+
+    last_pos_arg_name = pos_arg_names[-1]
     try:
-        first_char = sys.argv[1][0]
-    except IndexError:
-        parser.print_usage()
-        sys.exit(1)
-    if first_char != '-':
-        sys.argv[1] = '-' + sys.argv[1]
+        result[last_pos_arg_name] = [ result[last_pos_arg_name] ]
+    except KeyError:
+        result[last_pos_arg_name] = []
+    result[last_pos_arg_name].extend(pos_args[len(pos_arg_names):])
 
-    return parser.parse_args()
+    for opt in list(all_options) + pos_arg_names:
+        if opt not in result:
+            result[opt] = None
+
+    return result
 
 def main_add_one(store, filename, tag):
     if filename == '-':
@@ -377,48 +481,89 @@ def main_add_one(store, filename, tag):
         with open(filename, 'rb') as f:
             store.store(tag, f, aio=True)
 
-def main_add(store, members, name=None):
-    for member in members:
-        if name:
-            tag = name
-            name = None
-        else:
-            tag = os.path.basename(member)
-        main_add_one(store, member, tag)
-
-def main_extract_one(store, tag, filename):
-    if filename == '-':
-        store.load(tag, sys.stdout)
+def main_add(store, members, tag=None):
+    if not members:
+        if not tag:
+            tag = store.suggest_tag()
+        main_add_one(store, '-', tag)
+    elif len(members) == 1:
+        if not tag:
+            tag = members[0]
+        main_add_one(store, members[0], tag)
     else:
-        with open(filename, 'wb') as f:
-            store.load(tag, f)
+        for member in members:
+            main_add_one(store, member, member)
 
-def main_extract(store, members, name=None):
+def main_extract(store, members):
+    if not members:
+        members = [ store.get_last_tag() ]
     for tag in members:
-        if name:
-            filename = name
-            name = None
-        else:
-            filename = tag
-        main_extract_one(store, tag, filename)
+        store.load(tag, sys.stdout)
 
 def main():
-    args = parse_args()
+    try:
+        args = parse_args(sys.argv[1:])
+        if not any((args[k] for k in (list('cxtd') + ['fsck']))):
+            raise OptionError('a command is required')
+        if not args['f']:
+            raise OptionError('an archive must be specified')
+        if args['d'] and not args['member']:
+            raise OptionError('no member specified')
+        if args['L'] and not args['c']:
+            raise OptionError('option -L not valid except in create mode')
 
-    store = Store(args.archive, auto_create=args.add)
-    if args.add:
-        main_add(store, args.member, args.name)
-    elif args.extract:
-        main_extract(store, args.member, args.output_name)
-    elif args.delete:
-        for member in args.member:
-            store.delete(member)
-    elif args.list:
-        for tag in store.list_tags():
-            print tag
-    elif args.fsck:
-        store.fsck()
- 
+        store = Store(args['f'], auto_create=args['c'])
+        if args['c']:
+            main_add(store, args['member'], args['L'])
+        elif args['x']:
+            main_extract(store, args['member'])
+        elif args['d']:
+            for member in args['member']:
+                store.delete(member)
+        elif args['t']:
+            for tag in store.list_tags():
+                print tag
+        elif args['fsck']:
+            store.fsck()
+
+    except OptionHelpRequest:
+        print '''ddar: store multiple files efficiently in a de-duplicated archive
+
+Create or add to an archive:
+    ddar [-]c -f archive [-L member-name] < file
+    ddar [-]c -f archive [-L member-name] member
+    ddar [-]c -f archive member [member...]
+
+    If member-name is unspecified, ddar will use the supplied filename
+    as the member name, or for stdin create a suitable name based on the
+    current date.
+
+Extract from an archive:
+    ddar [-]x -f archive > file  # extract the most recent member
+    ddar [-]x -f archive member-name > file
+
+List members in an archive:
+    ddar [-]t -f archive
+
+Delete members from an archive:
+    ddar [-]d -f archive member-name [member-name...]
+
+Check an archive for integrity:
+    ddar --fsck -f archive
+
+
+Examples:
+    Back up your home directory daily:
+        tar c ~|gzip --rsyncable|ddar cf /mnt/external_disk/home_backup
+
+    Restore your home directory after a disaster:
+        ddar xf /mnt/external_disk/home_backup|tar xzC/
+'''
+        return
+    except OptionError, e:
+        print 'ddar: %s' % e.message
+        print 'Try: ddar --help'
+        return
 
 if __name__ == '__main__':
     main()
