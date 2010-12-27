@@ -274,7 +274,7 @@ struct scan_ctx *scan_init(void) {
     if (!scan)
 	goto unwind0;
 
-    scan->buffer_size = 3 * (1<<20);
+    scan->buffer_size = 3 * (1<<24);
     scan->buffer[0] = malloc(scan->buffer_size);
     if (!scan->buffer[0])
 	goto unwind1;
@@ -288,9 +288,9 @@ struct scan_ctx *scan_init(void) {
     scan->source_offset = 0;
 
     scan->window_size = 48;
-    scan->target_chunk_size = 1 << 16;
-    scan->minimum_chunk_size = 1 << 14;
-    scan->maximum_chunk_size = 1 << 18;
+    scan->target_chunk_size = 1 << 18;
+    scan->minimum_chunk_size = 1 << 16;
+    scan->maximum_chunk_size = 1 << 24;
     scan->rabin_ctx = rabin_init(1103515245, scan->window_size);
     if (!scan->rabin_ctx)
 	goto unwind2;
