@@ -3,7 +3,7 @@
 import argparse, binascii, errno, hashlib, os, os.path, stat, string, sqlite3
 import sys, tempfile, time
 
-import dds
+import tbl.dds
 
 class Store(object):
     def __init__(self, dirname, auto_create=False):
@@ -129,7 +129,7 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
         archive_id = cursor.lastrowid
         cursor.execute('DELETE FROM chunk WHERE archive_id=?', (archive_id,))
 
-        d = dds.DDS()
+        d = tbl.dds.DDS()
         d.set_file(f)
         if aio:
             d.set_aio()

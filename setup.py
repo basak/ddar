@@ -7,9 +7,11 @@ setup(name='ddar',
       author='Robie Basak',
       author_email='rb@synctus.com',
       url='http://www.synctus.com/ddar',
-      py_modules=['dds'],
+      packages=['tbl'],
       scripts=['ddar'],
-      ext_modules=[ Extension('_dds', ['scan.c', 'rabin.c', 'ddsmodule.c'],
+      ext_modules=[ Extension('tbl._dds', ['scan.c', 'rabin.c',
+                                           'tbl/ddsmodule.c'],
+                              include_dirs=['.'],
                               libraries=['rt']) ])
 
 # vim: set ts=8 sts=4 sw=4 ai et :
