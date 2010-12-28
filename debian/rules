@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+
+DEB_PYTHON_SYSTEM = pysupport
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/class/python-distutils.mk
+
+# -O3 preferred to get the store chunk analysis to go as fast as possible
+CFLAGS = -g -Wall -O3
+
+build/ddar::
+	xmltoman ddar.1.xml > ddar.1
+
+clean::
+	rm -f ddar.1
