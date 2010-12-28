@@ -14,7 +14,7 @@ test1: corpus1
 	cmp result.1 expected.1
 	
 test2: corpus1
-	LD_LIBRARY_PATH=.. PYTHONPATH=.. python libdds_test.py > result.1b
+	LD_LIBRARY_PATH=.. PYTHONPATH=.. python dds_test.py > result.1b
 	cmp result.1b expected.1
 	echo Test passed
 
