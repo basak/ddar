@@ -91,6 +91,13 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
             if e.errno != errno.EEXIST:
                 raise
 
+    def _removedirs(self, object_filename):
+        try:
+            os.removedirs(os.path.dirname(object_filename))
+        except OSError, e:
+            if e.errno != errno.ENOTEMPTY:
+                raise
+
     def _format_filename(self, n):
         return os.path.join(self.dirname, 'format', n)
 
@@ -203,7 +210,7 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
                 try:
                     object_filename = self._object_filename(h)
                     os.unlink(object_filename)
-                    os.removedirs(os.path.dirname(object_filename))
+                    self._removedirs(object_filename)
                 except OSError, e:
                     # ignore ENOENT to make delete idempotent on a SIGINT
                     if e.errno != errno.ENOENT:
