@@ -411,7 +411,7 @@ def parse_args(args):
     pos_arg_names = [ 'member' ]
 
     bool_options = set('ctxd') | set([ 'fsck', 'force-stdout' ])
-    arg_options = set([ 'f', 'L' ])
+    arg_options = set([ 'f', 'N' ])
     command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
 
     all_options = bool_options | arg_options | command_options
@@ -539,12 +539,12 @@ def main():
                 raise OptionError('an archive must be specified')
         if args['d'] and not args['member']:
             raise OptionError('no member specified')
-        if args['L'] and not args['c']:
-            raise OptionError('option -L not valid except in create mode')
+        if args['N'] and not args['c']:
+            raise OptionError('option -N not valid except in create mode')
 
         store = Store(args['f'], auto_create=args['c'])
         if args['c']:
-            main_add(store, args['member'], args['L'])
+            main_add(store, args['member'], args['N'])
         elif args['x']:
             if not args['force-stdout'] and os.isatty(sys.stdout.fileno()):
                 raise OptionError('output is a terminal and --force-stdout not specified')
@@ -562,8 +562,8 @@ def main():
         print '''ddar: store multiple files efficiently in a de-duplicated archive
 
 Create or add to an archive:
-    ddar [-]c [-f] archive [-L member-name] < file
-    ddar [-]c [-f] archive [-L member-name] member
+    ddar [-]c [-f] archive [-N member-name] < file
+    ddar [-]c [-f] archive [-N member-name] member
     ddar [-]c [-f] archive member [member...]
 
     If member-name is unspecified, ddar will use the supplied filename

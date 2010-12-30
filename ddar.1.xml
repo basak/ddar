@@ -4,8 +4,8 @@
 <manpage name="ddar" section="1" desc="store multiple files efficiently in a de-duplicated archive">
 
 <synopsis>
-<cmd>ddar [-]c [-f] <arg>archive</arg> [-L <arg>member-name</arg>] &lt; <arg>member</arg></cmd>
-<cmd>ddar [-]c [-f] <arg>archive</arg> [-L <arg>member-name</arg>] <arg>member</arg></cmd>
+<cmd>ddar [-]c [-f] <arg>archive</arg> [-N <arg>member-name</arg>] &lt; <arg>member</arg></cmd>
+<cmd>ddar [-]c [-f] <arg>archive</arg> [-N <arg>member-name</arg>] <arg>member</arg></cmd>
 <cmd>ddar [-]c [-f] <arg>archive</arg> <arg>member</arg> [<arg>member</arg>...]</cmd>
 <cmd>ddar [-]x [<arg>options</arg>] [-f] <arg>archive</arg> &gt; <arg>member</arg></cmd>
 <cmd>ddar [-]x [<arg>options</arg>] [-f] <arg>archive</arg> <arg>member-name</arg> &gt; <arg>member</arg></cmd>
@@ -85,7 +85,7 @@ option parity with <manref name="tar" section="1"/> for ease of use.
 <options>
 
 <option>
-<p><opt>-L</opt> <arg>member-name</arg></p>
+<p><opt>-N</opt> <arg>member-name</arg></p>
 <optdesc>(create/append only) Override the <arg>member-name</arg> to be used
 when adding a member to an archive.</optdesc>
 </option>
