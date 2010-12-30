@@ -60,17 +60,17 @@ class Store(object):
         db = sqlite3.connect(os.path.join(self.dirname, 'db'))
         c = db.cursor()
         c.execute('''
-CREATE TABLE archive (id INTEGER PRIMARY KEY,
+CREATE TABLE member (id INTEGER PRIMARY KEY,
                       name TEXT UNIQUE NOT NULL,
                       length INTEGER,
                       hash BLOB)''')
         c.execute('''
-CREATE TABLE chunk (archive_id INTEGER NOT NULL,
+CREATE TABLE chunk (member_id INTEGER NOT NULL,
                     hash BLOB NOT NULL,
                     offset INTEGER NOT NULL,
                     length INTEGER NOT NULL,
-                    UNIQUE (archive_id, offset),
-                    FOREIGN KEY (archive_id) REFERENCES archive(id))''')
+                    UNIQUE (member_id, offset),
+                    FOREIGN KEY (member_id) REFERENCES member(id))''')
         # No need for a (tag,offset) index as we have a UNIQUE
         # constraint on it. This causes sqlite to generate an index and
         # the documentatation states that there is a performance degradation
@@ -101,7 +101,7 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
     def _format_filename(self, n):
         return os.path.join(self.dirname, 'format', n)
 
-    def _store_chunk(self, archive_id, cursor, data, offset, length):
+    def _store_chunk(self, member_id, cursor, data, offset, length):
         '''Store the chunk in the database and the object store if necessary,
         but do not commit. The database insert is done last, so that if
         interrupted the database is never wrong. At worst a dangling object
@@ -121,20 +121,20 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
                 temp.close()
             os.rename(temp.name, object_filename)
         cursor.execute('INSERT INTO chunk ' +
-                       '(archive_id, hash, offset, length) ' +
+                       '(member_id, hash, offset, length) ' +
                        'VALUES (?, ?, ?, ?)',
-                       (archive_id, h_blob, offset, length))
+                       (member_id, h_blob, offset, length))
 
     def store(self, tag, f=sys.stdin, aio=False):
         cursor = self.db.cursor()
 
-        cursor.execute('SELECT 1 FROM archive WHERE name=? LIMIT 1', (tag,))
+        cursor.execute('SELECT 1 FROM member WHERE name=? LIMIT 1', (tag,))
         if cursor.fetchone():
-            raise RuntimeError("archive %s already exists" % tag)
+            raise RuntimeError("member %s already exists" % tag)
 
-        cursor.execute('INSERT INTO archive (name) VALUES (?)', (tag,))
-        archive_id = cursor.lastrowid
-        cursor.execute('DELETE FROM chunk WHERE archive_id=?', (archive_id,))
+        cursor.execute('INSERT INTO member (name) VALUES (?)', (tag,))
+        member_id = cursor.lastrowid
+        cursor.execute('DELETE FROM chunk WHERE member_id=?', (member_id,))
 
         d = tbl.dds.DDS()
         d.set_file(f)
@@ -147,31 +147,31 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
             h = hashlib.sha256()
             for data in d.chunks():
                 length = len(data)
-                self._store_chunk(archive_id, cursor, data, offset, length)
+                self._store_chunk(member_id, cursor, data, offset, length)
                 h.update(data)
                 offset += length
         except:
             raise
         else:
             h_blob = buffer(h.digest())
-            cursor.execute('UPDATE archive SET hash=?, length=? WHERE ' +
-                           'id=?', (h_blob, offset, archive_id))
+            cursor.execute('UPDATE member SET hash=?, length=? WHERE ' +
+                           'id=?', (h_blob, offset, member_id))
         finally:
             cursor.close()
             self.db.commit()
 
     def load(self, tag, f=sys.stdout):
         cursor = self.db.cursor()
-        cursor.execute('SELECT id, hash FROM archive WHERE name=?', (tag,))
+        cursor.execute('SELECT id, hash FROM member WHERE name=?', (tag,))
         row = cursor.fetchone()
         if not row:
             raise RuntimeError('member %s not found in archive' % tag)
 
-        archive_id, h = row
+        member_id, h = row
         expected_h = str(h)
         cursor.execute('SELECT hash, offset, length ' +
-                       'FROM chunk WHERE archive_id=? ' +
-                       'ORDER BY offset', (archive_id,))
+                       'FROM chunk WHERE member_id=? ' +
+                       'ORDER BY offset', (member_id,))
 
         h2 = hashlib.sha256()
         next_offset = 0
@@ -189,23 +189,23 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
             row = cursor.fetchone()
 
         if expected_h != h2.digest():
-            raise RuntimeError('Extracted archive failed hash check')
+            raise RuntimeError('Extracted member failed hash check')
 
     def delete(self, tag):
         cursor = self.db.cursor()
         cursor2 = self.db.cursor()
-        cursor.execute('SELECT id FROM archive WHERE name=?', (tag,))
+        cursor.execute('SELECT id FROM member WHERE name=?', (tag,))
         row = cursor.fetchone()
         if not row:
             raise RuntimeError('member %s not found in archive' % tag)
-        archive_id = row[0]
-        cursor.execute('SELECT hash FROM chunk WHERE archive_id=?',
-                       (archive_id,))
+        member_id = row[0]
+        cursor.execute('SELECT hash FROM chunk WHERE member_id=?',
+                       (member_id,))
         row = cursor.fetchone()
         while row:
             h = row[0]
             cursor2.execute('SELECT 1 FROM chunk WHERE hash=? AND ' +
-                            'archive_id != ? LIMIT 1', (h, archive_id))
+                            'member_id != ? LIMIT 1', (h, member_id))
             if not cursor2.fetchone():
                 try:
                     object_filename = self._object_filename(h)
@@ -216,14 +216,14 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
                     if e.errno != errno.ENOENT:
                         raise
             row = cursor.fetchone()
-        cursor.execute('DELETE FROM chunk WHERE archive_id=?', (archive_id,))
-        cursor.execute('DELETE FROM archive WHERE id=?', (archive_id,))
+        cursor.execute('DELETE FROM chunk WHERE member_id=?', (member_id,))
+        cursor.execute('DELETE FROM member WHERE id=?', (member_id,))
         cursor.close()
         self.db.commit()
 
     def list_tags(self):
         cursor = self.db.cursor()
-        cursor.execute('SELECT name FROM archive')
+        cursor.execute('SELECT name FROM member')
         tag = cursor.fetchone()
         while tag:
             yield tag[0]
@@ -231,18 +231,18 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
 
     def get_last_tag(self):
         cursor = self.db.cursor()
-        cursor.execute('SELECT name FROM archive ORDER BY rowid DESC LIMIT 1')
+        cursor.execute('SELECT name FROM member ORDER BY rowid DESC LIMIT 1')
         row = cursor.fetchone()
         return row[0] if row else None
 
     def suggest_tag(self):
         cursor = self.db.cursor()
         base = time.strftime('%Y-%m-%d')
-        cursor.execute('SELECT 1 FROM archive WHERE name=?', (base,))
+        cursor.execute('SELECT 1 FROM member WHERE name=?', (base,))
         if not cursor.fetchone():
             return base
         root_like = base + '-%'
-        cursor.execute('SELECT COUNT(*) FROM archive WHERE name LIKE ?',
+        cursor.execute('SELECT COUNT(*) FROM member WHERE name LIKE ?',
                        (root_like,))
         row = cursor.fetchone()
         if not row or not row[0]:
@@ -250,12 +250,12 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
 
         suffix = row[0] + 1
 
-        cursor.execute('SELECT 1 FROM archive WHERE name=?',
+        cursor.execute('SELECT 1 FROM member WHERE name=?',
                        ('%s-%s' % (base, suffix),))
         row = cursor.fetchone()
         while row:
             suffix += 1
-            cursor.execute('SELECT 1 FROM archive WHERE name=?',
+            cursor.execute('SELECT 1 FROM member WHERE name=?',
                            ('%s-%s' % (base, suffix),))
             row = cursor.fetchone()
 
@@ -303,18 +303,18 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
             
             row = cursor.fetchone()
 
-    def _fsck_db_to_fs_archive(self):
+    def _fsck_db_to_fs_member(self):
         cursor = self.db.cursor()
         cursor2 = self.db.cursor()
-        # Check each archive hash is correct
-        cursor.execute('SELECT id, name, hash FROM archive')
+        # Check each member hash is correct
+        cursor.execute('SELECT id, name, hash FROM member')
         row = cursor.fetchone()
         while row:
-            archive_id, tag, h = row
+            member_id, tag, h = row
             h = str(h)
 
-            cursor2.execute('SELECT hash FROM chunk WHERE archive_id=? ' +
-                            'ORDER BY offset', (archive_id,))
+            cursor2.execute('SELECT hash FROM chunk WHERE member_id=? ' +
+                            'ORDER BY offset', (member_id,))
 
             h2 = hashlib.sha256()
             row2 = cursor2.fetchone()
@@ -340,18 +340,18 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
         cursor = self.db.cursor()
         cursor2 = self.db.cursor()
 
-        # Check through each archive in the chunk table
-        cursor.execute('SELECT archive_id, offset, length FROM chunk ' +
-                       'ORDER BY archive_id, offset')
-        current_archive_id = None
+        # Check through each member in the chunk table
+        cursor.execute('SELECT member_id, offset, length FROM chunk ' +
+                       'ORDER BY member_id, offset')
+        current_member_id = None
         row = cursor.fetchone()
         while row:
-            archive_id, offset, length = row
-            if archive_id != current_archive_id:
-                current_archive_id = archive_id
+            member_id, offset, length = row
+            if member_id != current_member_id:
+                current_member_id = member_id
                 current_offset = 0
-                tag = cursor2.execute('SELECT name FROM archive WHERE id=?',
-                                      (archive_id,)).fetchone()[0]
+                tag = cursor2.execute('SELECT name FROM member WHERE id=?',
+                                      (member_id,)).fetchone()[0]
             if offset != current_offset:
                 if offset < current_offset:
                     print ("Chunk at offset %d for %s has an overlap" %
@@ -365,19 +365,19 @@ CREATE TABLE chunk (archive_id INTEGER NOT NULL,
 
             row = cursor.fetchone()
 
-        # Check all lengths in archive match chunk totals
+        # Check all lengths in member match chunk totals
         cursor.execute('''
-SELECT archive.name
+SELECT member.name
 
 FROM
-    archive,
+    member,
 
-    (SELECT archive_id, sum(length) AS length
-     FROM chunk GROUP BY archive_id) AS chunk_lengths
+    (SELECT member_id, sum(length) AS length
+     FROM chunk GROUP BY member_id) AS chunk_lengths
 
 WHERE
-      archive.id = chunk_lengths.archive_id
-      AND archive.length != chunk_lengths.length''')
+      member.id = chunk_lengths.member_id
+      AND member.length != chunk_lengths.length''')
         
         row = cursor.fetchone()
         while row:
@@ -388,7 +388,7 @@ WHERE
         self._fsck_db()
         self._fsck_fs()
         self._fsck_db_to_fs_chunk()
-        self._fsck_db_to_fs_archive()
+        self._fsck_db_to_fs_member()
 
 class OptionError(RuntimeError):
     def __init__(self, m):
