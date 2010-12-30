@@ -38,8 +38,7 @@ int main(int argc, char **argv) {
     buffer = (uint32_t *)malloc(BUFSIZE * sizeof(uint32_t));
     assert(buffer);
 
-    //long seed_length = read_seed(seed);
-    long seed_length = 4;
+    long seed_length = read_seed(seed);
     if (!seed_length)
 	return 1;
 
