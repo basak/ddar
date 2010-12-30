@@ -1,7 +1,7 @@
-import hashlib, dds
+import hashlib, tbl.dds
 
 f = open('corpus1', 'r')
-d = dds.DDS()
+d = tbl.dds.DDS()
 d.set_file(f)
 d.begin()
 offset = 0
