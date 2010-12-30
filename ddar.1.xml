@@ -1,0 +1,172 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE manpage SYSTEM "http://masqmail.cx/xmltoman/xmltoman.dtd">
+<?xml-stylesheet type="text/xsl" href="http://masqmail.cx/xmltoman/xmltoman.xsl" ?>
+<manpage name="ddar" section="1" desc="store multiple files efficiently in a de-duplicated archive">
+
+<synopsis>
+<cmd>ddar [-]c [-f] <arg>archive</arg> [-L <arg>member-name</arg>] &lt; <arg>member</arg></cmd>
+<cmd>ddar [-]c [-f] <arg>archive</arg> [-L <arg>member-name</arg>] <arg>member</arg></cmd>
+<cmd>ddar [-]c [-f] <arg>archive</arg> <arg>member</arg> [<arg>member</arg>...]</cmd>
+<cmd>ddar [-]x [<arg>options</arg>] [-f] <arg>archive</arg> &gt; <arg>member</arg></cmd>
+<cmd>ddar [-]x [<arg>options</arg>] [-f] <arg>archive</arg> <arg>member-name</arg> &gt; <arg>member</arg></cmd>
+<cmd>ddar [-]t [-f] <arg>archive</arg></cmd>
+<cmd>ddar [-]d [-f] <arg>archive</arg> <arg>member-name</arg> [<arg>member-name</arg>...]</cmd>
+<cmd>ddar --fsck [-f] <arg>archive</arg></cmd>
+</synopsis>
+
+<description>
+<p>ddar creates, modifies and extracts from archives. An archive is a directory
+holding a collection of other files in a structure that makes it possible to
+retrieve the original individual files (called members of the archive).</p>
+
+<p>Members of an archive are stored efficiently: ddar finds areas that are the
+same across members and stores them only once.</p>
+
+<p>ddar is intended to augment the standard tar | gzip -style pipeline,
+eliminating the need and complexities of incremental and differential backups
+by making the storage of multiple large full backups equally feasible.</p>
+
+<p>ddar is less sophisticated than <manref name="tarsnap" section="1"/>, but is
+useful for local archive storage in cases where the available upload bandwidth
+is too low to deal with the size of the archive that needs to be created.</p>
+</description>
+
+<section name="Mandatory arguments">
+<p>One operation argument from <arg>c</arg>, <arg>x</arg>, <arg>t</arg>,
+<arg>d</arg> or <arg>--fsck</arg> must be specified. As specifying an operation
+is mandatory, the prefix <arg>-</arg> is optional if the operation is the first argument.</p>
+
+<option>
+<p><opt>c</opt></p>
+<optdesc>Add <arg>member</arg> to <arg>archive</arg>. If <arg>archive</arg>
+does not exist, it will be created. If <arg>member-name</arg> is not specified,
+then the base name of <arg>member</arg> is used; if stdin is used, then a
+suitable name is automatically generated.</optdesc>
+</option>
+
+<option>
+<p><opt>x</opt></p>
+<optdesc>Extract <arg>member-name</arg> from <arg>archive</arg>. The member is
+written to stdout. If stdout is a terminal, then ddar will refuse unless
+<arg>--force-stdout</arg> is used. If <arg>member-name</arg> is not specified,
+then the last member to be added to the archive is used (based on addition
+order, not time).</optdesc>
+</option>
+
+<option>
+<p><opt>t</opt></p>
+<optdesc>List the members of <arg>archive</arg>.</optdesc>
+</option>
+
+<option>
+<p><opt>d</opt></p>
+<optdesc>Delete <arg>member-name</arg> from <arg>archive</arg>.</optdesc>
+</option>
+
+<option>
+<p><opt>--fsck</opt></p>
+<optdesc>Check <arg>archive</arg> for internal consistency. This also verifies
+that all members match the checksum computed when they were first stored. This
+operation is extremely time consuming, requiring two passes over the
+data.</optdesc>
+</option>
+
+<option>
+<p><opt>[-f] <arg>archive</arg></opt></p>
+<optdesc>Specify the <arg>archive</arg> upon which the operation will take
+effect. <arg>-f</arg> is optional here as all operations require
+<arg>archive</arg> and so this is not really an option. It exists for attempted
+option parity with <manref name="tar" section="1"/> for ease of use.
+</optdesc>
+</option>
+
+</section>
+
+<options>
+
+<option>
+<p><opt>-L</opt> <arg>member-name</arg></p>
+<optdesc>(create/append only) Override the <arg>member-name</arg> to be used
+when adding a member to an archive.</optdesc>
+</option>
+
+<option>
+<p><opt>--force-stdout</opt></p>
+<optdesc>(extract only) Force ddar to extract a member to stdout even when
+stdout is a terminal.</optdesc>
+</option>
+
+</options>
+
+<section name="Notes">
+<p>Unlike <manref name="tarsnap" section="1"/>, <manref name="tar"
+section="1"/> includes atimes by default, causing many changes to its output,
+thus making ddar ineffective at de-duplicating its archives. On Linux you can
+use the relatime option to help avoid this, which has been the default since
+2.6.30.</p>
+<p>ddar will run more efficiently if the archive is stored on a filesystem that
+does not degrade as directories become large, such as ext3 or ext4 with
+dir_index enabled.</p>
+</section>
+
+<section name="Examples">
+<p>Back up your home directory daily:</p>
+<cmd>tar c ~|gzip --rsyncable|ddar cf /mnt/external_disk/home_backup</cmd>
+<p>Restore your home directory after a disaster:</p>
+<cmd>ddar xf /mnt/external_disk/home_backup|tar xzC/</cmd>
+</section>
+
+<section name="Security">
+<p>ddar relies on system security and does not provide anything further. You
+may wish to keep your ddar archives in a directory to which only you have
+access, adjust the permission bits on the ddar archive directories
+themselves and/or encrypt the entire filesystem on which your ddar archives are
+stored. For a secure, hosted de-duplicating backup solution, try tarsnap
+&lt;<url href="http://www.tarsnap.com/"/>&gt;.</p>
+</section>
+
+<section name="Bugs">
+<p>ddar currently assumes that SHA-256 never collides. Although no collisions
+are known to date (2010), collisions must nevertheless exist due to the
+pigeonhole principle. However, the probability of such a collision occurring is
+so low that it is considered far more likely that the computer will perform a
+random computation error, so save for a SHA-256 weakness being found ddar
+should be safe from data corruption in this manner. A future version of ddar
+may enhance the archive format to automatically detect and accomodate
+collisions, although checking for collisions would impact performance.</p>
+<p>As an extra precaution, ddar computes the SHA-256 of the entire member on
+insertion into an archive, and verifies this on extraction. However, this means
+that a failure would only be detected on extraction and not on insertion.</p>
+</section>
+
+<seealso>
+<p><manref name="ar" section="1"/>, <manref name="tar" section="1"/>, <manref
+name="gzip" section="1"/>, <manref name="tarsnap" section="1"/>.</p>
+</seealso>
+
+<section name="Author">
+<p>ddar and this man page were both written by Robie Basak
+&lt;rb@synctus.com&gt;.</p>
+</section>
+
+<section name="Credits">
+<p>ddar is sponsored by Synctus &lt;<url href="http://www.synctus.com/"/>&gt;, a
+multi-master, conflict-free, real-time file replication system.</p>
+<p>ddar was inspired by tarsnap &lt;<url
+href="http://www.tarsnap.com/"/>&gt;, a cloud-based de-duplicating backup
+tool.</p>
+</section>
+
+<section name="Copyright">
+<p>Copyright 2010 True Blue Logic Ltd.</p>
+<p>This manpage is in part derived from <manref name="ar" section="1"/>; thus
+the following notices apply:</p>
+<p>Copyright (c) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000,
+2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010 Free Software
+Foundation, Inc.</p>
+<p>Permission is granted to copy, distribute and/or modify this document under
+the terms of the GNU Free Documentation License, Version 1.3 or any later
+version published by the Free Software Foundation; with no Invariant Sections,
+with no Front-Cover Texts, and with no Back-Cover Texts.</p>
+</section>
+</manpage>
