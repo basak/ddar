@@ -1,7 +1,5 @@
 before() {
-	top=/tmp/ddar-test.$$
-	rm -Rf $top
-	mkdir $top
+	top=`mktemp --tmpdir -d ddar-test.XXXXXXXXXX`
 	ddar_src=`pwd`
 	cd $top
 }
