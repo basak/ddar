@@ -22,4 +22,4 @@ test2: corpus1
 	echo Test passed
 
 random: random.c mt19937ar.c
-	$(CC) -o random random.c
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o random random.c
