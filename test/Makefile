@@ -6,6 +6,9 @@ tests: corpus test1 test2
 corpus: corpus1
 	md5sum -c MD5SUMS
 
+corpus0: corpus1
+	dd if=corpus1 of=corpus0 bs=1k count=2097
+
 corpus1: seed1 random
 	./random 268435466 < seed1 > corpus1
 
