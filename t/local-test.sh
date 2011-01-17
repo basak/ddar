@@ -1,15 +1,12 @@
 before() {
 	top=`mktemp --tmpdir -d ddar-test.XXXXXXXXXX`
 	ddar_src=`pwd`
+	PATH="$ddar_src:$PATH"
 	cd $top
 }
 
 after() {
 	rm -Rf $top
-}
-
-ddar() {
-	PYTHONPATH="$ddar_src" python "$ddar_src/ddar" "$@"
 }
 
 it_shows_usage_1() {
