@@ -1,7 +1,10 @@
 CFLAGS = -O3
 
-.PHONY: tests test1 test2
-tests: test1 test2
+.PHONY: tests test1 test2 corpus
+tests: corpus test1 test2
+
+corpus: corpus1
+	md5sum -c MD5SUMS
 
 corpus1: seed1 random
 	./random 268435466 < seed1 > corpus1
