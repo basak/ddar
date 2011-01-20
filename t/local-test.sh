@@ -9,6 +9,10 @@ after() {
 	rm -Rf $top
 }
 
+fsck() {
+	ddar --fsck "$1"
+}
+
 it_shows_usage_1() {
 	result=`ddar -h`
 	echo "$result"|grep -qi options
@@ -23,11 +27,13 @@ it_stores_and_extracts_foo() {
 	echo foo|ddar cf archive
 	result=`ddar xf archive`
 	test "$result" = "foo"
+	fsck archive
 }
 
 it_stores_and_extracts_corpus0() {
 	ddar cf archive < "$ddar_src/test/corpus0"
 	ddar xf archive|cmp - "$ddar_src/test/corpus0"
+	fsck archive
 }
 
 it_deletes_a_member_in_the_middle_of_the_archive() {
@@ -41,9 +47,5 @@ it_deletes_a_member_in_the_middle_of_the_archive() {
 	test `ddar xf archive A` = 1
 	test `ddar xf archive C` = 3
 	! ddar xf archive B >/dev/null
-}
-
-it_fscks_a_valid_archive() {
-	echo foo|ddar cf archive
-	ddar --fsck -f archive
+	fsck archive
 }
