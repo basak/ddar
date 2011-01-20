@@ -652,6 +652,7 @@ class RemoteArchive(Archive):
         _set_nonblocking(p.stdout)
         self.rsh = p
         self.decoder = netstring.Decoder()
+        self.request_q = collections.deque()
 
     def _not_implemented(self):
         raise NotImplementedError()
@@ -679,20 +680,55 @@ class RemoteArchive(Archive):
             if data == '':
                 raise RuntimeError('Remote process closed unexpectedly')
 
-    def _request(self, request):
-        self.rsh.stdin.write(netstring.encode(request.SerializeToString()))
-        self.rsh.stdin.flush()
+    class _RemoteArchiveReply(object):
+        def __init__(self, remote_archive, callback):
+            self.remote_archive = remote_archive
+            self.callback = callback
+            self._have_reply = False
+
+        @property
+        def reply(self):
+            if not self._have_reply:
+                self.flush()
+            return self._reply
+
+        def receive_reply(self, value):
+            self._reply = self.callback(value)
+            self._have_reply = True
+
+        def flush(self):
+            if self._have_reply:
+                return
+            self.remote_archive._read_reply(self)
+            assert(self._have_reply)
+
+    def _read_one_reply(self):
+        request = self.request_q.popleft()
         reply = tbl.ddar_pb2.Reply()
         reply.ParseFromString(self._read_one_netstring())
-        return reply
+        request.receive_reply(reply)
+        return request
+
+    def _read_reply(self, request):
+        while self._read_one_reply() is not request: pass
+
+    def _request(self, request, callback):
+        self.rsh.stdin.write(netstring.encode(request.SerializeToString()))
+        self.rsh.stdin.flush()
+        request = self._RemoteArchiveReply(self, callback)
+        self.request_q.append(request)
+        return request
 
     def _have_chunk(self, cursor, h):
         request = tbl.ddar_pb2.Request()
         request.have_chunk_request.sha256 = h
-        reply = self._request(request)
-        assert(reply.HasField('have_chunk_reply'))
-        assert(reply.have_chunk_reply.sha256 == h)
-        return _ImmediateRequest(reply.have_chunk_reply.have)
+
+        def _process_have_chunk_reply(reply):
+            assert(reply.HasField('have_chunk_reply'))
+            assert(reply.have_chunk_reply.sha256 == h)
+            return reply.have_chunk_reply.have
+
+        return self._request(request, _process_have_chunk_reply)
 
     def _store_chunk(self, member_id, cursor, data, offset, length,
                      sha256=None):
@@ -705,17 +741,22 @@ class RemoteArchive(Archive):
         r.sha256 = sha256
         r.offset = offset
         r.length = length
-        reply = self._request(request)
-        assert(reply.HasField('store_chunk_reply'))
-        assert(reply.store_chunk_reply.sha256 == sha256)
+
+        def _process_store_chunk_reply(reply):
+            assert(reply.HasField('store_chunk_reply'))
+            assert(reply.store_chunk_reply.sha256 == sha256)
+
+        return self._request(request, _process_store_chunk_reply)
 
     def _store_complete_member(self, cursor, h, length, member_id):
         request = tbl.ddar_pb2.Request()
         request.commit_request.sha256 = h
         request.commit_request.length = length
-        reply = self._request(request)
-        assert(reply.HasField('commit_reply'))
-        return _ImmediateRequest(None)
+
+        def _process_store_complete_member_reply(reply):
+            assert(reply.HasField('commit_reply'))
+
+        return self._request(request, _process_store_complete_member_reply)
 
     def store(self, tag, f=sys.stdin, aio=False, server=False):
         assert(not server)
