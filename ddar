@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-import argparse, binascii, errno, hashlib, fcntl, os, os.path, select, stat
-import string, sqlite3, subprocess, sys, tempfile, time
+import argparse, binascii, collections, errno, hashlib, fcntl, os, os.path
+import select, stat, string, sqlite3, subprocess, sys, tempfile, time
 
 import tbl.ddar_pb2, tbl.dds
 import tbl.netstring as netstring
@@ -35,6 +35,50 @@ class _ImmediateRequest(object):
         self.reply = reply
 
     def flush(self): pass
+
+class _WorkPipeline(object):
+    def __init__(self, size, in_fn, out_fn):
+        self.size = size
+        self.in_fn = in_fn
+        self.out_fn = out_fn
+
+        self.q = collections.deque()
+
+    def _push(self, item):
+        self.q.append(self.in_fn(item))
+    
+    def _pop(self):
+        self.out_fn(*self.q.popleft())
+
+    def _flush(self):
+        while self.q:
+            self._pop()
+
+    def feed_and_flush(self, src):
+        '''Given an iterable src, this will call work = in_fn(item) and then
+        out_fn(*work) for item in src, interleaving the calls such that size
+        work is in progress at a time.'''
+
+        src = iter(src)
+
+        # Fill the pipeline
+        for i in xrange(self.size):
+            try:
+                item = src.next()
+            except StopIteration:
+                # Source emptied before pipeline filled; just flush the
+                # remaining items back out
+                self._flush()
+                return
+            self._push(item)
+
+        # Work the pipeline
+        for item in src:
+            self._push(item)
+            self._pop()
+
+        # Source is now empty: flush the final items
+        self._flush()
 
 class Archive(object):
     def __init__(self, dirname, auto_create=False):
@@ -217,16 +261,26 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             finally:
                 self._store_commit(cursor)
 
-    def _analyze_and_store(self, cursor, dds, member_id):
-        offset = 0
+    def _analyze_and_store(self, cursor, dds, member_id, pipeline_size=0):
+        total_length = [0]
         full_h = hashlib.sha256()
-        for data in dds.chunks():
+
+        def in_fn(data):
+            offset = total_length[0]
             length = len(data)
             chunk_h = hashlib.sha256(data).digest()
 
-            full_h.update(data)
+            request = self._have_chunk(cursor=cursor,
+                                       h=hashlib.sha256(data).digest())
 
-            if self._have_chunk(cursor=cursor, h=chunk_h).reply:
+            # Update running stats
+            total_length[0] += length
+            full_h.update(data)
+            
+            return request, data, chunk_h, offset, length
+
+        def out_fn(request, data, chunk_h, offset, length):
+            if request.reply:
                 data = None
             self._store_chunk(member_id=member_id,
                               cursor=cursor,
@@ -235,9 +289,10 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                               length=length,
                               sha256=chunk_h)
 
-            offset += length
-
-        return offset, full_h.digest()
+        work_pipeline = _WorkPipeline(pipeline_size, in_fn, out_fn)
+        work_pipeline.feed_and_flush(dds.chunks())
+            
+        return total_length[0], full_h.digest()
 
     def _store(self, cursor, member_id, f, aio):
         dds = tbl.dds.DDS()
