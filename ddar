@@ -217,16 +217,10 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             finally:
                 self._store_commit(cursor)
 
-    def _store(self, cursor, member_id, f, aio):
-        d = tbl.dds.DDS()
-        d.set_file(f)
-        if aio:
-            d.set_aio()
-        d.begin()
-
+    def _analyze_and_store(self, cursor, dds, member_id):
         offset = 0
         full_h = hashlib.sha256()
-        for data in d.chunks():
+        for data in dds.chunks():
             length = len(data)
             chunk_h = hashlib.sha256(data).digest()
 
@@ -243,9 +237,20 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
 
             offset += length
 
+        return offset, full_h.digest()
+
+    def _store(self, cursor, member_id, f, aio):
+        dds = tbl.dds.DDS()
+        dds.set_file(f)
+        if aio:
+            dds.set_aio()
+        dds.begin()
+
+        length, h = self._analyze_and_store(cursor, dds, member_id)
+        
         self._store_complete_member(cursor=cursor,
-                                    h=full_h.digest(),
-                                    length=offset,
+                                    h=h,
+                                    length=length,
                                     member_id=member_id).flush()
 
     class _StoreRPCServer(object):
