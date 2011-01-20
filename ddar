@@ -427,6 +427,8 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             all((d in cls.hexdigits for d in h)))
 
     def _fsck_fs(self):
+        status = True
+
         cursor = self.db.cursor()
         for h in os.listdir(os.path.join(self.dirname, 'objects')):
             if not self._valid_hex_hash(h):
@@ -435,8 +437,13 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                            (buffer(binascii.unhexlify(h)),))
             if not cursor.fetchone():
                 print 'Unknown object %s' % h
+                status = False
+
+        return status
 
     def _fsck_db_to_fs_chunk(self):
+        status = True
+
         cursor = self.db.cursor()
 
         # Check each hash is correct
@@ -452,15 +459,22 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                     data = f.read(length+1)
             except IOError:
                 print "Could not read chunk %s" % binascii.hexlify(h)
+                status = False
             else:
                 if len(data) != length:
                     print "Chunk %s wrong size" % binascii.hexlify(h)
+                    status = False
                 elif hashlib.sha256(data).digest() != h:
                     print "Chunk %s corrupt" % binascii.hexlify(h)
+                    status = False
             
             row = cursor.fetchone()
 
+        return status
+
     def _fsck_db_to_fs_member(self):
+        status = True
+
         cursor = self.db.cursor()
         cursor2 = self.db.cursor()
         # Check each member hash is correct
@@ -483,6 +497,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                 except IOError:
                     print ("Could not read chunk %s from %s" %
                             (binascii.hexlify(chunk_hash), tag))
+                    status = False
                 else:
                     h2.update(data)
 
@@ -490,10 +505,15 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
 
             if h != h2.digest():
                 print '%s: hash mismatch' % tag
+                status = False
 
             row = cursor.fetchone()
+        
+        return status
 
     def _fsck_db(self):
+        status = True
+
         cursor = self.db.cursor()
         cursor2 = self.db.cursor()
 
@@ -513,10 +533,12 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                 if offset < current_offset:
                     print ("Chunk at offset %d for %s has an overlap" %
                         (offset, tag))
+                    status = False
                 else:
                     assert(offset > current_offset)
                     print ("Hole in %s found between %d and %d" %
                         (tag, current_offset, offset))
+                    status = False
                 current_offset = offset
             current_offset += length
 
@@ -539,13 +561,18 @@ WHERE
         row = cursor.fetchone()
         while row:
             print 'Length mismatch in %s' % row[0]
+            status = False
             row = cursor.fetchone()
 
+        return status
+
     def fsck(self):
-        self._fsck_db()
-        self._fsck_fs()
-        self._fsck_db_to_fs_chunk()
-        self._fsck_db_to_fs_member()
+        status = True
+        status = status and self._fsck_db()
+        status = status and self._fsck_fs()
+        status = status and self._fsck_db_to_fs_chunk()
+        status = status and self._fsck_db_to_fs_member()
+        return status
 
 class RemoteArchive(Archive):
     def __init__(self, rsh, server, args):
@@ -810,7 +837,10 @@ def main():
             for tag in archive.list_tags():
                 print tag
         elif args['fsck']:
-            archive.fsck()
+            if not archive.fsck():
+                archive.close()
+                print 'fsck returned errors'
+                sys.exit(1)
 
         archive.close()
 
