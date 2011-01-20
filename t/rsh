@@ -1,0 +1,10 @@
+#!/bin/sh
+
+cd $REMOTE_TOP
+shift
+if [ "$1" != "ddar" ]; then
+	echo "Remote command not ddar; stub failed" >&2
+	exit 1
+fi
+shift
+exec "$DDAR_SRC/ddar" "$@"

@@ -1,0 +1,44 @@
+message HaveChunkRequest {
+	required bytes sha256 = 1;
+}
+
+message HaveChunkReply {
+	required bool have = 1;
+
+	// including the hash of the chunk the reply corresponds to will
+	// allow an assertion to check for bugs, but in future this could
+	// be dropped in order to save return bandwidth
+	optional bytes sha256 = 2;
+}
+
+message StoreChunkRequest {
+	optional bytes data = 1;
+	required bytes sha256 = 2;
+	required uint64 offset = 3;
+	required uint64 length = 4;
+}
+
+message StoreChunkReply {
+	optional bytes sha256 = 1;
+}
+
+message CommitRequest {
+	optional bytes sha256 = 1;
+	optional uint64 length = 2;
+}
+
+message CommitReply {
+	optional bytes sha256 = 1;
+}
+
+message Request {
+	optional HaveChunkRequest have_chunk_request = 1;
+	optional StoreChunkRequest store_chunk_request = 2;
+	optional CommitRequest commit_request = 3;
+}
+
+message Reply {
+	optional HaveChunkReply have_chunk_reply = 1;
+	optional StoreChunkReply store_chunk_reply = 2;
+	optional CommitReply commit_reply = 3;
+}

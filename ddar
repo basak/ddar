@@ -1,11 +1,36 @@
 #!/usr/bin/python
 
-import argparse, binascii, errno, hashlib, os, os.path, stat, string, sqlite3
-import sys, tempfile, time
+import argparse, binascii, errno, hashlib, fcntl, os, os.path, select, stat
+import string, sqlite3, subprocess, sys, tempfile, time
 
-import tbl.dds
+import tbl.ddar_pb2, tbl.dds
+import tbl.netstring as netstring
 
-class Store(object):
+def _set_nonblocking(fileobj):
+    fd = fileobj.fileno()
+    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
+    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+def _read_some(fileobj):
+    while True:
+        try:
+            # Attempt an initial read before a select. It seems that Python
+            # can hold some data buffered from a previous read, causing a
+            # select to block indefinitely even though there is data available
+            # because the fileobj has read it in already. At least this is
+            # my best guess based on the behaviour I was seeing.
+            data = fileobj.read()
+        except IOError, e:
+            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                select.select([fileobj.fileno()], [], [], None)
+            elif e.errno == errno.EINTR:
+                pass
+            else:
+                raise
+        else:   
+            return data
+
+class Archive(object):
     def __init__(self, dirname, auto_create=False):
         self.dirname = dirname
 
@@ -103,16 +128,35 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
     def _format_filename(self, n):
         return os.path.join(self.dirname, 'format', n)
 
-    def _store_chunk(self, member_id, cursor, data, offset, length):
+    def close(self): pass
+
+    @staticmethod
+    def _have_chunk(cursor, h):
+        h_blob = buffer(h) # buffer to make sqlite use a BLOB
+        cursor.execute('SELECT 1 FROM chunk WHERE hash=? LIMIT 1', (h_blob,))
+        return bool(cursor.fetchone())
+
+    def _store_chunk(self, member_id, cursor, data, offset, length,
+                     sha256=None):
         '''Store the chunk in the database and the object store if necessary,
         but do not commit. The database insert is done last, so that if
         interrupted the database is never wrong. At worst a dangling object
-        will be left in the object store.'''
+        will be left in the object store.
+        
+        If sha256 is provided, then data can be None, in which case the chunk
+        must be in the object store already. If sha256 and data are both
+        provided, then they must match.'''
 
-        h = hashlib.sha256(data).digest()
-        h_blob = buffer(h) # buffer to make sqlite use a BLOB
-        cursor.execute('SELECT 1 FROM chunk WHERE hash=?', (h_blob,))
-        if not cursor.fetchone():
+        if data is None:
+            assert(sha256 is not None)
+            h = sha256
+        else:
+            h = hashlib.sha256(data).digest()
+            assert(sha256 is None or sha256 == h)
+            assert(len(data) == length)
+
+        if not self._have_chunk(cursor, h):
+            assert(data is not None)
             object_filename = self._object_filename(h)
             object_dir = os.path.dirname(object_filename)
             self._makedirs(object_filename)
@@ -122,14 +166,15 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             finally:
                 temp.close()
             os.rename(temp.name, object_filename)
+
+        h_blob = buffer(h)
         cursor.execute('INSERT INTO chunk ' +
                        '(member_id, hash, offset, length) ' +
                        'VALUES (?, ?, ?, ?)',
                        (member_id, h_blob, offset, length))
 
-    def store(self, tag, f=sys.stdin, aio=False):
-        cursor = self.db.cursor()
-
+    @staticmethod
+    def _store_add_member(cursor, tag):
         cursor.execute('SELECT 1 FROM member WHERE name=? LIMIT 1', (tag,))
         if cursor.fetchone():
             raise RuntimeError("member %s already exists" % tag)
@@ -138,30 +183,139 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                        (tag, int(time.time())))
         member_id = cursor.lastrowid
         cursor.execute('DELETE FROM chunk WHERE member_id=?', (member_id,))
+        return member_id
 
+    def _store_complete_member(self, cursor, h, length, member_id):
+        h_blob = buffer(h)
+        cursor.execute('UPDATE member SET hash=?, length=? WHERE ' +
+                       'id=?', (h_blob, length, member_id))
+
+    def _store_commit(self, cursor):
+        try:
+            cursor.close()
+        except:
+            pass
+        self.db.commit()
+
+    def store(self, tag, f=sys.stdin, aio=False, server=False):
+        cursor = self.db.cursor()
+        member_id = self._store_add_member(cursor, tag)
+        if server:
+            return self._StoreRPCServer(archive=self,
+                                        member_id=member_id,
+                                        cursor=cursor).loop()
+        else:
+            try:
+                self._store(cursor, member_id, f, aio)
+            finally:
+                self._store_commit(cursor)
+
+    def _store(self, cursor, member_id, f, aio):
         d = tbl.dds.DDS()
         d.set_file(f)
         if aio:
             d.set_aio()
         d.begin()
 
-        try:
-            offset = 0
-            h = hashlib.sha256()
-            for data in d.chunks():
-                length = len(data)
-                self._store_chunk(member_id, cursor, data, offset, length)
-                h.update(data)
-                offset += length
-        except:
-            raise
-        else:
-            h_blob = buffer(h.digest())
-            cursor.execute('UPDATE member SET hash=?, length=? WHERE ' +
-                           'id=?', (h_blob, offset, member_id))
-        finally:
-            cursor.close()
-            self.db.commit()
+        offset = 0
+        full_h = hashlib.sha256()
+        for data in d.chunks():
+            length = len(data)
+            chunk_h = hashlib.sha256(data).digest()
+
+            full_h.update(data)
+
+            if self._have_chunk(cursor=cursor, h=chunk_h):
+                data = None
+            self._store_chunk(member_id=member_id,
+                              cursor=cursor,
+                              data=data,
+                              offset=offset,
+                              length=length,
+                              sha256=chunk_h)
+
+            offset += length
+
+        self._store_complete_member(cursor=cursor,
+                                    h=full_h.digest(),
+                                    length=offset,
+                                    member_id=member_id)
+
+    class _StoreRPCServer(object):
+        def __init__(self, archive, member_id, cursor):
+            self.archive = archive
+            self.member_id = member_id
+            self.cursor = cursor
+
+        def _rpc_have_chunk_request(self, req):
+            reply = tbl.ddar_pb2.HaveChunkReply()
+            reply.have = self.archive._have_chunk(self.cursor, req.sha256)
+            reply.sha256 = req.sha256
+            return reply
+
+        def _rpc_store_chunk_request(self, req):
+            if req.HasField('data'):
+                data = req.data
+            else:
+                data = None
+
+            self.archive._store_chunk(member_id=self.member_id,
+                                      cursor=self.cursor,
+                                      data=data,
+                                      offset=req.offset,
+                                      length=req.length,
+                                      sha256=req.sha256)
+            reply = tbl.ddar_pb2.StoreChunkReply()
+            reply.sha256 = req.sha256
+            return reply
+
+        def _rpc_commit_request(self, req):
+            self.archive._store_complete_member(cursor=self.cursor,
+                                                h=req.sha256,
+                                                length=req.length,
+                                                member_id=self.member_id)
+            # Commit now so that it is confirmed before the reply. Another
+            # attempt will happen after EOF as well.
+            self.archive._store_commit(self.cursor)
+            reply = tbl.ddar_pb2.CommitReply()
+            reply.sha256 = req.sha256
+            return reply
+
+        def _rpc_request(self, name, req):
+            reply = getattr(self, '_rpc_' + name, req)(req)
+            wrapped_reply = tbl.ddar_pb2.Reply()
+            for field in wrapped_reply.DESCRIPTOR.fields:
+                if field.message_type == reply.DESCRIPTOR:
+                    getattr(wrapped_reply, field.name).MergeFrom(reply)
+                    getattr(wrapped_reply, field.name).SetInParent()
+                    break
+            else:
+                raise RuntimeError("Couldn't find reply field in wrapper")
+            sys.stdout.write(netstring.encode(wrapped_reply.SerializeToString()))
+            sys.stdout.flush()
+
+        def loop(self):
+            decoder = netstring.Decoder()
+            _set_nonblocking(sys.stdin)
+
+            try:
+                data = _read_some(sys.stdin)
+                while data:
+                    for encoded_request in decoder.feed(data):
+                        request_container = tbl.ddar_pb2.Request()
+                        request_container.ParseFromString(encoded_request)
+                        for req_type, req in request_container.ListFields():
+                            self._rpc_request(req_type.name, req)
+
+                    data = _read_some(sys.stdin)
+            finally:
+                # Same as local: commit anyway to get any partial writes. This
+                # will be consistent since we are careful about storing chunk
+                # object files before adding them to the DB
+                
+                # This could have also happened on CommitRequest but a
+                # duplicate is fine
+                self.archive._store_commit(self.cursor)
 
     def load(self, tag, f=sys.stdout):
         cursor = self.db.cursor()
@@ -393,6 +547,85 @@ WHERE
         self._fsck_db_to_fs_chunk()
         self._fsck_db_to_fs_member()
 
+class RemoteArchive(Archive):
+    def __init__(self, rsh, server, args):
+        # Override parent completely
+        remote_args = [ rsh, server, "ddar", "--server" ]
+        remote_args.extend(args)
+        p = subprocess.Popen(' '.join(remote_args),
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True,
+                close_fds=True)
+        _set_nonblocking(p.stdout)
+        self.rsh = p
+        self.decoder = netstring.Decoder()
+
+    def _not_implemented(self):
+        raise NotImplementedError()
+
+    store = _not_implemented
+    load = _not_implemented
+    delete = _not_implemented
+    list_tags = _not_implemented
+    get_last_tag = _not_implemented
+    suggest_tag = _not_implemented
+    fsck = _not_implemented
+
+    def close(self):
+        self.rsh.stdin.close()
+        result = self.rsh.wait()
+        if result != 0:
+            raise RuntimeError('Remote process returned %d' % result)
+
+    def _read_one_netstring(self):
+        data = None
+        while True:
+            for s in self.decoder.feed(data):
+                return s
+            data = _read_some(self.rsh.stdout)
+            if data == '':
+                raise RuntimeError('Remote process closed unexpectedly')
+
+    def _request(self, request):
+        self.rsh.stdin.write(netstring.encode(request.SerializeToString()))
+        self.rsh.stdin.flush()
+        reply = tbl.ddar_pb2.Reply()
+        reply.ParseFromString(self._read_one_netstring())
+        return reply
+
+    def _have_chunk(self, cursor, h):
+        request = tbl.ddar_pb2.Request()
+        request.have_chunk_request.sha256 = h
+        reply = self._request(request)
+        assert(reply.HasField('have_chunk_reply'))
+        assert(reply.have_chunk_reply.sha256 == h)
+        return reply.have_chunk_reply.have
+
+    def _store_chunk(self, member_id, cursor, data, offset, length,
+                     sha256=None):
+        if sha256 is None:
+            sha256 = hashlib.sha256(data).digest()
+        request = tbl.ddar_pb2.Request()
+        r = request.store_chunk_request
+        if data is not None:
+            r.data = data
+        r.sha256 = sha256
+        r.offset = offset
+        r.length = length
+        reply = self._request(request)
+        assert(reply.HasField('store_chunk_reply'))
+        assert(reply.store_chunk_reply.sha256 == sha256)
+
+    def _store_complete_member(self, cursor, h, length, member_id):
+        request = tbl.ddar_pb2.Request()
+        request.commit_request.sha256 = h
+        request.commit_request.length = length
+        reply = self._request(request)
+        assert(reply.HasField('commit_reply'))
+
+    def store(self, tag, f=sys.stdin, aio=False, server=False):
+        assert(not server)
+        self._store(None, None, f, aio)
+
 class OptionError(RuntimeError):
     def __init__(self, m):
         self.message = m
@@ -410,8 +643,8 @@ def parse_args(args):
     pos_args = []
     pos_arg_names = [ 'member' ]
 
-    bool_options = set('ctxd') | set([ 'fsck', 'force-stdout' ])
-    arg_options = set([ 'f', 'N' ])
+    bool_options = set('ctxd') | set([ 'fsck', 'force-stdout', 'server' ])
+    arg_options = set([ 'f', 'N', 'rsh' ])
     command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
 
     all_options = bool_options | arg_options | command_options
@@ -501,25 +734,28 @@ def parse_args(args):
 
     return result
 
-def main_add_one(store, filename, tag):
-    if filename == '-':
+def main_add_one(store, filename, tag, server=False):
+    if server:
+        store.store(tag, None, server=True)
+    elif filename == '-':
         store.store(tag, sys.stdin)
     else:
         with open(filename, 'rb') as f:
             store.store(tag, f, aio=True)
 
-def main_add(store, members, tag=None):
+def main_add(store, members, tag=None, server=False):
     if not members:
         if not tag:
-            tag = store.suggest_tag()
-        main_add_one(store, '-', tag)
+            try: tag = store.suggest_tag()
+            except NotImplementedError: pass
+        main_add_one(store, '-', tag, server=server)
     elif len(members) == 1:
         if not tag:
             tag = members[0]
-        main_add_one(store, members[0], tag)
+        main_add_one(store, members[0], tag, server=server)
     else:
         for member in members:
-            main_add_one(store, member, member)
+            main_add_one(store, member, member, server=server)
 
 def main_extract(store, members):
     if not members:
@@ -542,21 +778,41 @@ def main():
         if args['N'] and not args['c']:
             raise OptionError('option -N not valid except in create mode')
 
-        store = Store(args['f'], auto_create=args['c'])
+        if (':' in args['f'] or args['server']) and len(args['member']) > 1:
+            raise OptionError('can only add one item at once to remote archive')
+
+        if ':' in args['f']:
+            if not args['c']:
+                raise OptionError('remote archive only permitted with -c')
+            server, filename = args['f'].split(':')
+            remote_args = [ '-c', '-f', filename ]
+            if args['N']:
+                remote_args.extend(['-N', args['N']])
+            if args['rsh']:
+                rsh = args['rsh']
+            else:
+                rsh = 'ssh'
+            archive = RemoteArchive(rsh=rsh, server=server, args=remote_args)
+            args['f'] = filename
+        else:
+            archive = Archive(args['f'], auto_create=args['c'])
+
         if args['c']:
-            main_add(store, args['member'], args['N'])
+            main_add(archive, args['member'], args['N'], server=args['server'])
         elif args['x']:
             if not args['force-stdout'] and os.isatty(sys.stdout.fileno()):
                 raise OptionError('output is a terminal and --force-stdout not specified')
-            main_extract(store, args['member'])
+            main_extract(archive, args['member'])
         elif args['d']:
             for member in args['member']:
-                store.delete(member)
+                archive.delete(member)
         elif args['t']:
-            for tag in store.list_tags():
+            for tag in archive.list_tags():
                 print tag
         elif args['fsck']:
-            store.fsck()
+            archive.fsck()
+
+        archive.close()
 
     except OptionHelpRequest:
         print '''ddar: store multiple files efficiently in a de-duplicated archive
