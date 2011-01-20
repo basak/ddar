@@ -30,6 +30,12 @@ def _read_some(fileobj):
         else:   
             return data
 
+class _ImmediateRequest(object):
+    def __init__(self, reply):
+        self.reply = reply
+
+    def flush(self): pass
+
 class Archive(object):
     def __init__(self, dirname, auto_create=False):
         self.dirname = dirname
@@ -134,7 +140,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
     def _have_chunk(cursor, h):
         h_blob = buffer(h) # buffer to make sqlite use a BLOB
         cursor.execute('SELECT 1 FROM chunk WHERE hash=? LIMIT 1', (h_blob,))
-        return bool(cursor.fetchone())
+        return _ImmediateRequest(bool(cursor.fetchone()))
 
     def _store_chunk(self, member_id, cursor, data, offset, length,
                      sha256=None):
@@ -155,7 +161,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             assert(sha256 is None or sha256 == h)
             assert(len(data) == length)
 
-        if not self._have_chunk(cursor, h):
+        if not self._have_chunk(cursor, h).reply:
             assert(data is not None)
             object_filename = self._object_filename(h)
             object_dir = os.path.dirname(object_filename)
@@ -189,6 +195,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
         h_blob = buffer(h)
         cursor.execute('UPDATE member SET hash=?, length=? WHERE ' +
                        'id=?', (h_blob, length, member_id))
+        return _ImmediateRequest(None)
 
     def _store_commit(self, cursor):
         try:
@@ -225,7 +232,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
 
             full_h.update(data)
 
-            if self._have_chunk(cursor=cursor, h=chunk_h):
+            if self._have_chunk(cursor=cursor, h=chunk_h).reply:
                 data = None
             self._store_chunk(member_id=member_id,
                               cursor=cursor,
@@ -239,7 +246,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
         self._store_complete_member(cursor=cursor,
                                     h=full_h.digest(),
                                     length=offset,
-                                    member_id=member_id)
+                                    member_id=member_id).flush()
 
     class _StoreRPCServer(object):
         def __init__(self, archive, member_id, cursor):
@@ -249,7 +256,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
 
         def _rpc_have_chunk_request(self, req):
             reply = tbl.ddar_pb2.HaveChunkReply()
-            reply.have = self.archive._have_chunk(self.cursor, req.sha256)
+            reply.have = self.archive._have_chunk(self.cursor, req.sha256).reply
             reply.sha256 = req.sha256
             return reply
 
@@ -625,7 +632,7 @@ class RemoteArchive(Archive):
         reply = self._request(request)
         assert(reply.HasField('have_chunk_reply'))
         assert(reply.have_chunk_reply.sha256 == h)
-        return reply.have_chunk_reply.have
+        return _ImmediateRequest(reply.have_chunk_reply.have)
 
     def _store_chunk(self, member_id, cursor, data, offset, length,
                      sha256=None):
@@ -648,6 +655,7 @@ class RemoteArchive(Archive):
         request.commit_request.length = length
         reply = self._request(request)
         assert(reply.HasField('commit_reply'))
+        return _ImmediateRequest(None)
 
     def store(self, tag, f=sys.stdin, aio=False, server=False):
         assert(not server)
