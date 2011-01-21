@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-from distutils.core import setup, Extension
+from setuptools import setup, Extension
 
 setup(name='ddar',
       version='0.1',
@@ -12,6 +12,7 @@ setup(name='ddar',
       ext_modules=[ Extension('tbl._dds', ['scan.c', 'rabin.c',
                                            'tbl/ddsmodule.c'],
                               include_dirs=['.'],
-                              libraries=['rt']) ])
+                              libraries=['rt']) ],
+      install_requires=['google.protobuf'])
 
 # vim: set ts=8 sts=4 sw=4 ai et :
