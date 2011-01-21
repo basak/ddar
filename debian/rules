@@ -9,8 +9,7 @@ include /usr/share/cdbs/1/class/python-distutils.mk
 CFLAGS = -g -Wall -O3
 
 build/ddar::
-	xmltoman ddar.1.xml > ddar.1
-	protoc --python_out=. tbl/ddar.proto
+	make pydist
 
 clean::
 	rm -f ddar.1
