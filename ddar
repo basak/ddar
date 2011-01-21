@@ -115,14 +115,20 @@ class Archive(object):
 
     @staticmethod
     def _read_small_file(name, size_limit=1024):
-        with open(name, 'r') as f:
+        f = open(name, 'r')
+        try:
             data = f.read(size_limit)
+        finally:
+            f.close()
         return data
 
     @staticmethod
     def _write_small_file(name, data):
-        with open(name, 'w') as f:
+        f = open(name, 'w')
+        try:
             f.write(data)
+        finally:
+            f.close()
 
     def _create(self):
         os.mkdir(self.dirname)
@@ -403,8 +409,11 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
         while row:
             h, offset, length = row
             assert(offset == next_offset)
-            with open(self._object_filename(h), 'rb') as g:
+            g = open(self._object_filename(h), 'rb')
+            try:
                 data = g.read()
+            finally:
+                g.close()
             assert(len(data) == length)
             h2.update(data)
             f.write(data)
@@ -522,8 +531,11 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             h = str(h) # sqlite3 returns a buffer for a BLOB; we want an str;
                        # otherwise comparisons never match
             try:
-                with open(self._object_filename(h), 'rb') as f:
+                f = open(self._object_filename(h), 'rb')
+                try:
                     data = f.read(length+1)
+                finally:
+                    f.close()
             except IOError:
                 print "Could not read chunk %s" % binascii.hexlify(h)
                 status = False
@@ -559,8 +571,11 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             while row2:
                 chunk_hash = row2[0]
                 try:
-                    with open(self._object_filename(chunk_hash), 'rb') as f:
+                    f = open(self._object_filename(chunk_hash), 'rb')
+                    try:
                         data = f.read()
+                    finally:
+                        f.close()
                 except IOError:
                     print ("Could not read chunk %s from %s" %
                             (binascii.hexlify(chunk_hash), tag))
@@ -876,8 +891,11 @@ def main_add_one(store, filename, tag, server=False):
     elif filename == '-':
         store.store(tag, sys.stdin)
     else:
-        with open(filename, 'rb') as f:
+        f = open(filename, 'rb')
+        try:
             store.store(tag, f, aio=True)
+        finally:
+            f.close()
 
 def main_add(store, members, tag=None, server=False):
     if not members:
