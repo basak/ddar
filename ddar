@@ -360,7 +360,13 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             for field in wrapped_reply.DESCRIPTOR.fields:
                 if field.message_type == reply.DESCRIPTOR:
                     getattr(wrapped_reply, field.name).MergeFrom(reply)
-                    getattr(wrapped_reply, field.name).SetInParent()
+
+                    # SetInParent is not present in google.protobuf 2.0.3 and
+                    # so breaks Hardy. This isn't actually needed right now
+                    # as all our protocol messages have content so will get
+                    # set automatically
+
+                    # getattr(wrapped_reply, field.name).SetInParent()
                     break
             else:
                 raise RuntimeError("Couldn't find reply field in wrapper")
