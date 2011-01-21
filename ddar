@@ -216,12 +216,13 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             object_filename = self._object_filename(h)
             object_dir = os.path.dirname(object_filename)
             self._makedirs(object_filename)
-            temp = tempfile.NamedTemporaryFile(dir=object_dir, delete=False)
+            temp_fd, temp_name = tempfile.mkstemp(dir=object_dir)
+            temp = os.fdopen(temp_fd, 'w')
             try:
                 temp.write(data)
             finally:
                 temp.close()
-            os.rename(temp.name, object_filename)
+            os.rename(temp_name, object_filename)
 
         h_blob = buffer(h)
         cursor.execute('INSERT INTO chunk ' +
