@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Robie Basak <rb@synctus.com>
 Standards-Version: 3.9.1.0
 Build-Depends: cdbs, debhelper (>= 5), python-all-dev (>= 2.5), python-support,
- xmltoman, protobuf-compiler
+ xmltoman, protobuf-compiler, python-setuptools
 Homepage: http://www.synctus.com/ddar
 XS-Python-Version: >= 2.5
 
