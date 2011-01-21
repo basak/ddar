@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
-import argparse, binascii, collections, errno, hashlib, fcntl, os, os.path
-import select, stat, string, sqlite3, subprocess, sys, tempfile, time
+import binascii, collections, errno, hashlib, fcntl, os, os.path, select
+import stat, string, sqlite3, subprocess, sys, tempfile, time
 
 import tbl.ddar_pb2, tbl.dds
 import tbl.netstring as netstring
