@@ -104,8 +104,8 @@ PyMODINIT_FUNC init_dds(void) {
     m = Py_InitModule("_dds", dds_methods);
     if (!m)
         return;
-    (void)PyModule_AddIntMacro(m, SCAN_CHUNK_FOUND);
-    (void)PyModule_AddIntMacro(m, SCAN_CHUNK_LAST);
+    (void)PyModule_AddIntConstant(m, "SCAN_CHUNK_FOUND", SCAN_CHUNK_FOUND);
+    (void)PyModule_AddIntConstant(m, "SCAN_CHUNK_LAST", SCAN_CHUNK_LAST);
 }
 
 /* vim: set ts=8 sts=4 sw=4 cindent : */
