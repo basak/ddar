@@ -1029,9 +1029,9 @@ Examples:
 '''
         return
     except OptionError, e:
-        print 'ddar: %s' % e.message
-        print 'Try: ddar --help'
-        return
+        print >>sys.stderr, 'ddar: %s' % e.message
+        print >>sys.stderr, 'Try: ddar --help'
+        sys.exit(2)
 
 if __name__ == '__main__':
     main()
