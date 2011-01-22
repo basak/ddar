@@ -43,3 +43,25 @@ it_will_not_store_from_two_files() {
 	ddar -cf localhost:archive foo bar && false
 	[ $? -eq 2 ]
 }
+
+it_stores_from_a_pipe() {
+	echo foo|ddar -cf localhost:archive
+	[ `ddar -xf $REMOTE_TOP/archive` = foo ]
+}
+
+it_stores_from_a_pipe_with_a_name() {
+	echo foo|ddar -cf localhost:archive -N bar
+	[ `ddar -xf $REMOTE_TOP/archive bar` = foo ]
+}
+
+it_stores_from_a_file() {
+	echo bar > foo
+	ddar -cf localhost:archive foo
+	[ `ddar -xf $REMOTE_TOP/archive foo` = bar ]
+}
+
+it_stores_from_a_file_with_a_name() {
+	echo bar > foo
+	ddar -cf localhost:archive foo -N baz
+	[ `ddar -xf $REMOTE_TOP/archive baz` = bar ]
+}

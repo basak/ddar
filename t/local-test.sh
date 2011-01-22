@@ -30,6 +30,28 @@ it_stores_and_extracts_foo() {
 	fsck archive
 }
 
+it_stores_from_a_pipe() {
+	echo foo|ddar -cf archive
+	[ `ddar -xf archive` = foo ]
+}
+
+it_stores_from_a_pipe_with_a_name() {
+	echo foo|ddar -cf archive -N bar
+	[ `ddar -xf archive bar` = foo ]
+}
+
+it_stores_from_a_file() {
+	echo bar > foo
+	ddar -cf archive foo
+	[ `ddar -xf archive foo` = bar ]
+}
+
+it_stores_from_a_file_with_a_name() {
+	echo bar > foo
+	ddar -cf archive foo -N baz
+	[ `ddar -xf archive baz` = bar ]
+}
+
 it_stores_and_extracts_corpus0() {
 	ddar cf archive < "$ddar_src/test/corpus0"
 	ddar xf archive|cmp - "$ddar_src/test/corpus0"
