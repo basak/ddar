@@ -737,7 +737,14 @@ class RemoteArchive(Archive):
         while self._read_one_reply() is not request: pass
 
     def _request(self, request, callback):
-        self.rsh.stdin.write(netstring.encode(request.SerializeToString()))
+        enc_req = netstring.encode(request.SerializeToString())
+        try:
+            self.rsh.stdin.write(enc_req)
+        except IOError, e:
+            if e.errno == errno.EPIPE:
+                raise ConsoleError('remote process closed unexpectedly')
+            else:
+                raise
         self.rsh.stdin.flush()
         request = self._RemoteArchiveReply(self, callback)
         self.request_q.append(request)
