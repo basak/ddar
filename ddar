@@ -1039,6 +1039,7 @@ def main():
             remote_args = [ '-c', '-f', filename ]
             if args['N']:
                 remote_args.extend(['-N', args['N']])
+            remote_args.extend(args['member'])
             if args['rsh']:
                 rsh = args['rsh']
             else:
