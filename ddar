@@ -6,6 +6,60 @@ import stat, string, sqlite3, subprocess, sys, tempfile, time
 import tbl.ddar_pb2, tbl.dds
 import tbl.netstring as netstring
 
+# Protocol magic and version exchange is as follows:
+#  1. Send magic
+#  2. Send my version
+#  3. Await magic and version from other side
+#  4. Send the version we want to use
+#  5. Receive the version the other side wants to use
+#  6. Use the lower of the two requested version numbers if possible, or
+#     bomb out if not possible
+#
+# For passive mode, await magic from step 3 moves to step 0.
+
+PROTOCOL_MAGIC = "ddar"
+PROTOCOL_VERSION = "1" # ASCII decimal string for readability
+
+def _check_protocol(in_f, out_f, passive=False):
+    decoder = netstring.Decoder()
+
+    def _send(m):
+        out_f.write(netstring.encode(m))
+        out_f.flush()
+
+    def _read_one_netstring():
+        # Read one byte at a time to avoid reading too much and making
+        # the API too complicated by having to return excess read data.
+        data = None
+        while True:
+            for s in decoder.feed(data):
+                return s
+            data = in_f.read(1)
+            if data == '':
+                raise ConsoleError('remote process closed unexpectedly')
+
+    def _check(m):
+        magic = _read_one_netstring()
+        if magic != m:
+            print >>sys.stderr, "%r != %r" % (magic, m)
+            raise RuntimeError('Protocol mismatch')
+
+    def _ignore():
+        _read_one_netstring()
+
+    if passive:
+        _check(PROTOCOL_MAGIC)
+        _send(PROTOCOL_MAGIC)
+        _send(PROTOCOL_VERSION)
+    else:
+        _send(PROTOCOL_MAGIC)
+        _send(PROTOCOL_VERSION)
+        _check(PROTOCOL_MAGIC)
+
+    _ignore() # don't care what other side says; we only support version 1
+    _send(PROTOCOL_VERSION)
+    _check(PROTOCOL_VERSION)
+
 class ConsoleError(RuntimeError):
     def __init__(self, m):
         self.message = m
@@ -377,6 +431,8 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             sys.stdout.flush()
 
         def loop(self):
+            _check_protocol(sys.stdin, sys.stdout)
+
             decoder = netstring.Decoder()
             _set_nonblocking(sys.stdin)
 
@@ -673,6 +729,9 @@ class RemoteArchive(Archive):
         p = subprocess.Popen(' '.join(remote_args),
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True,
                 close_fds=True)
+
+        _check_protocol(p.stdout, p.stdin, passive=True)
+
         _set_nonblocking(p.stdout)
         self.rsh = p
         self.decoder = netstring.Decoder()
