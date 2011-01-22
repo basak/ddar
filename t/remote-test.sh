@@ -36,3 +36,10 @@ it_stores_corpus0_and_dedups_a_second_time() {
 	ddar -cf localhost:archive < "$DDAR_SRC/test/corpus0"
 	ddar -xf $REMOTE_TOP/archive|cmp - "$DDAR_SRC/test/corpus0"
 }
+
+it_will_not_store_from_two_files() {
+	echo 1 > foo
+	echo 2 > bar
+	ddar -cf localhost:archive foo bar && false
+	[ $? -eq 2 ]
+}
