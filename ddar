@@ -311,7 +311,8 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             pass
         self.db.commit()
 
-    def store(self, tag, f=sys.stdin, aio=False, server=False):
+    def store(self, tag, f=sys.stdin, aio=False, server=False,
+              pipeline_size=None):
         cursor = self.db.cursor()
         member_id = self._store_add_member(cursor, tag)
         if server:
@@ -320,11 +321,15 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                                         cursor=cursor).loop()
         else:
             try:
-                self._store(cursor, member_id, f, aio)
+                self._store(cursor, member_id, f, aio,
+                            pipeline_size=pipeline_size)
             finally:
                 self._store_commit(cursor)
 
-    def _analyze_and_store(self, cursor, dds, member_id, pipeline_size=0):
+    def _analyze_and_store(self, cursor, dds, member_id, pipeline_size=None):
+        if pipeline_size is None:
+            pipeline_size = 0
+
         total_length = [0]
         full_h = hashlib.sha256()
 
@@ -357,14 +362,15 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             
         return total_length[0], full_h.digest()
 
-    def _store(self, cursor, member_id, f, aio):
+    def _store(self, cursor, member_id, f, aio, pipeline_size=None):
         dds = tbl.dds.DDS()
         dds.set_file(f)
         if aio:
             dds.set_aio()
         dds.begin()
 
-        length, h = self._analyze_and_store(cursor, dds, member_id)
+        length, h = self._analyze_and_store(cursor, dds, member_id,
+                                            pipeline_size=pipeline_size)
         
         self._store_complete_member(cursor=cursor,
                                     h=h,
@@ -848,9 +854,10 @@ class RemoteArchive(Archive):
 
         return self._request(request, _process_store_complete_member_reply)
 
-    def store(self, tag, f=sys.stdin, aio=False, server=False):
+    def store(self, tag, f=sys.stdin, aio=False, server=False,
+              pipeline_size=None):
         assert(not server)
-        self._store(None, None, f, aio)
+        self._store(None, None, f, aio, pipeline_size=pipeline_size)
 
 class OptionError(RuntimeError):
     def __init__(self, m):
@@ -870,7 +877,7 @@ def parse_args(args):
     pos_arg_names = [ 'member' ]
 
     bool_options = set('ctxd') | set([ 'fsck', 'force-stdout', 'server' ])
-    arg_options = set([ 'f', 'N', 'rsh' ])
+    arg_options = set([ 'f', 'N', 'rsh', 'pipeline-size' ])
     command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
 
     all_options = bool_options | arg_options | command_options
@@ -972,31 +979,34 @@ def parse_args(args):
 
     return result
 
-def main_add_one(store, filename, tag, server=False):
+def main_add_one(store, filename, tag, server=False, pipeline_size=None):
     if server:
-        store.store(tag, None, server=True)
+        store.store(tag, None, server=True, pipeline_size=pipeline_size)
     elif filename == '-':
-        store.store(tag, sys.stdin)
+        store.store(tag, sys.stdin, pipeline_size=pipeline_size)
     else:
         f = open(filename, 'rb')
         try:
-            store.store(tag, f, aio=True)
+            store.store(tag, f, aio=True, pipeline_size=pipeline_size)
         finally:
             f.close()
 
-def main_add(store, members, tag=None, server=False):
+def main_add(store, members, tag=None, server=False, pipeline_size=None):
     if not members:
         if not tag:
             try: tag = store.suggest_tag()
             except NotImplementedError: pass
-        main_add_one(store, '-', tag, server=server)
+        main_add_one(store, '-', tag, server=server,
+                     pipeline_size=pipeline_size)
     elif len(members) == 1:
         if not tag:
             tag = members[0]
-        main_add_one(store, members[0], tag, server=server)
+        main_add_one(store, members[0], tag, server=server,
+                     pipeline_size=pipeline_size)
     else:
         for member in members:
-            main_add_one(store, member, member, server=server)
+            main_add_one(store, member, member, server=server,
+                         pipeline_size=pipeline_size)
 
 def main_extract(store, members):
     if not members:
@@ -1035,11 +1045,16 @@ def main():
                 rsh = 'ssh'
             archive = RemoteArchive(rsh=rsh, server=server, args=remote_args)
             args['f'] = filename
+            if args['pipeline-size'] is None:
+                args['pipeline-size'] = '8'
         else:
             archive = Archive(args['f'], auto_create=args['c'])
+            if args['pipeline-size'] is None:
+                args['pipeline-size'] = '0'
 
         if args['c']:
-            main_add(archive, args['member'], args['N'], server=args['server'])
+            main_add(archive, args['member'], args['N'], server=args['server'],
+                     pipeline_size=int(args['pipeline-size']))
         elif args['x']:
             if not args['force-stdout'] and os.isatty(sys.stdout.fileno()):
                 raise OptionError('output is a terminal and --force-stdout not specified')
