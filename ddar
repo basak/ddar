@@ -6,6 +6,10 @@ import stat, string, sqlite3, subprocess, sys, tempfile, time
 import tbl.ddar_pb2, tbl.dds
 import tbl.netstring as netstring
 
+class ConsoleError(RuntimeError):
+    def __init__(self, m):
+        self.message = m
+
 def _set_nonblocking(fileobj):
     fd = fileobj.fileno()
     fl = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -88,25 +92,23 @@ class Archive(object):
             if auto_create:
                 self._create()
             else:
-                raise RuntimeError("archive %s not found" % self.dirname)
+                raise ConsoleError("archive %s not found" % self.dirname)
         elif not os.path.isdir(self.dirname):
-            raise RuntimeError("%s exists but is not a ddar directory" %
+            raise ConsoleError("%s exists but is not a ddar directory" %
                                self.dirname)
 
         try:
             format_name = self._read_small_file(self._format_filename('name'))
         except:
-            raise RuntimeError('%s is not a ddar directory' %
-                               self.dirname)
+            raise ConsoleError('%s is not a ddar directory' % self.dirname)
         else:
             if format_name.lstrip().rstrip() != 'ddar':
-                raise RuntimeError('%s is not a ddar directory' %
-                                   self.dirname)
+                raise ConsoleError('%s is not a ddar directory' % self.dirname)
 
         version = self._read_small_file(self._format_filename('version'))
         version = version.lstrip().rstrip()
         if version != '1':
-            raise RuntimeError('%s uses ddar archive version %s but only' +
+            raise ConsoleError('%s uses ddar archive version %s but only' +
                                'version 1 is supported' % self.dirname)
 
         self.db = sqlite3.connect(os.path.join(self.dirname, 'db'))
@@ -234,7 +236,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
     def _store_add_member(cursor, tag):
         cursor.execute('SELECT 1 FROM member WHERE name=? LIMIT 1', (tag,))
         if cursor.fetchone():
-            raise RuntimeError("member %s already exists" % tag)
+            raise ConsoleError("member %s already exists" % tag)
 
         cursor.execute('INSERT INTO member (name, create_time) VALUES (?, ?)',
                        (tag, int(time.time())))
@@ -402,7 +404,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
         cursor.execute('SELECT id, hash FROM member WHERE name=?', (tag,))
         row = cursor.fetchone()
         if not row:
-            raise RuntimeError('member %s not found in archive' % tag)
+            raise ConsoleError('member %s not found in archive' % tag)
 
         member_id, h = row
         expected_h = str(h)
@@ -429,7 +431,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             row = cursor.fetchone()
 
         if expected_h != h2.digest():
-            raise RuntimeError('Extracted member failed hash check')
+            raise ConsoleError('extracted member failed hash check')
 
     def delete(self, tag):
         cursor = self.db.cursor()
@@ -437,7 +439,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
         cursor.execute('SELECT id FROM member WHERE name=?', (tag,))
         row = cursor.fetchone()
         if not row:
-            raise RuntimeError('member %s not found in archive' % tag)
+            raise ConsoleError('member %s not found in archive' % tag)
         member_id = row[0]
         cursor.execute('SELECT hash FROM chunk WHERE member_id=?',
                        (member_id,))
@@ -691,7 +693,7 @@ class RemoteArchive(Archive):
         self.rsh.stdin.close()
         result = self.rsh.wait()
         if result != 0:
-            raise RuntimeError('Remote process returned %d' % result)
+            raise ConsoleError('Remote process returned %d' % result)
 
     def _read_one_netstring(self):
         data = None
@@ -700,7 +702,7 @@ class RemoteArchive(Archive):
                 return s
             data = _read_some(self.rsh.stdout)
             if data == '':
-                raise RuntimeError('Remote process closed unexpectedly')
+                raise ConsoleError('remote process closed unexpectedly')
 
     class _RemoteArchiveReply(object):
         def __init__(self, remote_archive, callback):
@@ -977,6 +979,10 @@ def main():
                 sys.exit(1)
 
         archive.close()
+
+    except ConsoleError, e:
+        print >>sys.stderr, 'ddar:', e.message
+        sys.exit(1)
 
     except OptionHelpRequest:
         print '''ddar: store multiple files efficiently in a de-duplicated archive
