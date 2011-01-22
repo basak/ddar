@@ -888,8 +888,20 @@ def parse_args(args):
         if arg == 'help':
             raise OptionHelpRequest()
 
+        idx = arg.find('=')
+        if idx >= 0:
+            equals_param = arg[idx+1:]
+            arg = arg[:idx]
+            if arg not in arg_options:
+                raise OptionError('option %s does not take a parameter' % arg)
+        else:
+            equals_param = None
+
         if arg in arg_options:
-            set_result(arg, arg_iter.next())
+            if equals_param is None:
+                set_result(arg, arg_iter.next())
+            else:
+                set_result(arg, equals_param)
         elif arg in bool_options:
             set_result(arg, True)
         else:
