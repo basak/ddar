@@ -1063,6 +1063,11 @@ def main():
         if (':' in args['f'] or args['server']) and len(args['member']) > 1:
             raise OptionError('can only add one item at once to remote archive')
 
+        if args['rsh']:
+            rsh = args['rsh']
+        else:
+            rsh = 'ssh'
+
         if ':' in args['f']:
             if not args['c']:
                 raise OptionError('remote archive only permitted with -c')
@@ -1071,10 +1076,6 @@ def main():
             if args['N']:
                 remote_args.extend(['-N', args['N']])
             remote_args.extend(args['member'])
-            if args['rsh']:
-                rsh = args['rsh']
-            else:
-                rsh = 'ssh'
             ipc = RshIPC(cmd=rsh, host=host, args=remote_args)
             archive = RemoteArchive(ipc)
             args['f'] = filename
