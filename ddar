@@ -6,6 +6,8 @@ import stat, string, sqlite3, subprocess, sys, tempfile, time
 import tbl.ddar_pb2, tbl.dds
 import tbl.netstring as netstring
 
+DEFAULT_REMOTE_PIPELINE_SIZE = '8' # string for cmdline equiv.
+
 # Protocol magic and version exchange is as follows:
 #  1. Send magic
 #  2. Send my version
@@ -877,7 +879,8 @@ def parse_args(args):
     pos_args = []
     pos_arg_names = [ 'member' ]
 
-    bool_options = set('ctxd') | set([ 'fsck', 'force-stdout', 'server' ])
+    bool_options = set('ctxd') | set([ 'fsck', 'force-stdout', 'server',
+                                       'sender' ])
     arg_options = set([ 'f', 'N', 'rsh', 'pipeline-size' ])
     command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
 
@@ -1050,7 +1053,7 @@ def main():
         args = parse_args(sys.argv[1:])
         if not any((args[k] for k in (list('cxtd') + ['fsck']))):
             raise OptionError('a command is required')
-        if not args['f']:
+        if not args['f'] and not args['sender']:
             try:
                 args['f'] = args['member'].pop(0)
             except IndexError:
@@ -1059,8 +1062,10 @@ def main():
             raise OptionError('no member specified')
         if args['N'] and not args['c']:
             raise OptionError('option -N not valid except in create mode')
+        if args['server'] and args['sender']:
+            raise OptionError('--server and --sender cannot both be set')
 
-        if (':' in args['f'] or args['server']) and len(args['member']) > 1:
+        if len(args['member']) > 1 and (':' in args['f'] or args['server']):
             raise OptionError('can only add one item at once to remote archive')
 
         if args['rsh']:
@@ -1068,7 +1073,12 @@ def main():
         else:
             rsh = 'ssh'
 
-        if ':' in args['f']:
+        if args['sender']:
+            archive = RemoteArchive(StdIPC())
+            source_ipc = None
+            if args['pipeline-size'] is None:
+                args['pipeline-size'] = DEFAULT_REMOTE_PIPELINE_SIZE
+        elif ':' in args['f']:
             if not args['c']:
                 raise OptionError('remote archive only permitted with -c')
             host, filename = args['f'].split(':')
@@ -1076,19 +1086,39 @@ def main():
             if args['N']:
                 remote_args.extend(['-N', args['N']])
             remote_args.extend(args['member'])
-            ipc = RshIPC(cmd=rsh, host=host, args=remote_args)
-            archive = RemoteArchive(ipc)
+            archive_ipc = RshIPC(cmd=rsh, host=host, args=remote_args)
+            archive = RemoteArchive(archive_ipc)
             args['f'] = filename
             if args['pipeline-size'] is None:
-                args['pipeline-size'] = '8'
+                args['pipeline-size'] = DEFAULT_REMOTE_PIPELINE_SIZE
+            source_ipc = None
+        elif args['member'] and any(':' in m for m in args['member']):
+            if not args['c']:
+                raise OptionError('remote source only permitted with -c')
+            if len(args['member']) > 1:
+                raise OptionError('only one member permitted when using ' +
+                                  'remote source')
+            if not args['c']:
+                raise OptionError('remote archive only permitted with -c')
+
+            if args['pipeline-size'] is None:
+                args['pipeline-size'] = '0'
+            archive = Archive(args['f'], auto_create=True)
+            
+            host, filename = args['member'][0].split(':')
+            args['member'][0] = filename
+            remote_args = [ '--sender', '-c', filename ]
+            if args['N']:
+                remote_args.extend(['-N', args['N']])
+            source_ipc = RshIPC(cmd=rsh, host=host, args=remote_args)
         else:
+            source_ipc = StdIPC() if args['server'] else None
             archive = Archive(args['f'], auto_create=args['c'])
             if args['pipeline-size'] is None:
                 args['pipeline-size'] = '0'
 
         if args['c']:
-            ipc = StdIPC() if args['server'] else None
-            main_add(archive, args['member'], args['N'], ipc=ipc,
+            main_add(archive, args['member'], args['N'], ipc=source_ipc,
                      pipeline_size=int(args['pipeline-size']))
         elif args['x']:
             if not args['force-stdout'] and os.isatty(sys.stdout.fileno()):
