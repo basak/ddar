@@ -980,9 +980,9 @@ def parse_args(args):
 
     return result
 
-def main_add_one(store, filename, tag, server=False, pipeline_size=None):
-    if server:
-        store.store_server(ipc=StdIPC(), tag=tag)
+def main_add_one(store, filename, tag, ipc=None, pipeline_size=None):
+    if ipc:
+        store.store_server(ipc=ipc, tag=tag)
     elif filename == '-':
         store.store(tag, sys.stdin, pipeline_size=pipeline_size)
     else:
@@ -992,21 +992,21 @@ def main_add_one(store, filename, tag, server=False, pipeline_size=None):
         finally:
             f.close()
 
-def main_add(store, members, tag=None, server=False, pipeline_size=None):
+def main_add(store, members, tag=None, ipc=None, pipeline_size=None):
     if not members:
         if not tag:
             try: tag = store.suggest_tag()
             except NotImplementedError: pass
-        main_add_one(store, '-', tag, server=server,
+        main_add_one(store, '-', tag, ipc=ipc,
                      pipeline_size=pipeline_size)
     elif len(members) == 1:
         if not tag:
             tag = members[0]
-        main_add_one(store, members[0], tag, server=server,
+        main_add_one(store, members[0], tag, ipc=ipc,
                      pipeline_size=pipeline_size)
     else:
         for member in members:
-            main_add_one(store, member, member, server=server,
+            main_add_one(store, member, member, ipc=ipc,
                          pipeline_size=pipeline_size)
 
 def main_extract(store, members):
@@ -1087,7 +1087,8 @@ def main():
                 args['pipeline-size'] = '0'
 
         if args['c']:
-            main_add(archive, args['member'], args['N'], server=args['server'],
+            ipc = StdIPC() if args['server'] else None
+            main_add(archive, args['member'], args['N'], ipc=ipc,
                      pipeline_size=int(args['pipeline-size']))
         elif args['x']:
             if not args['force-stdout'] and os.isatty(sys.stdout.fileno()):
