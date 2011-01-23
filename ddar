@@ -1017,7 +1017,7 @@ def main_extract(store, members):
 
 class RshIPC(object):
     def __init__(self, cmd, host, args):
-        remote_args = [ cmd, host, "ddar", "--server" ]
+        remote_args = [ cmd, host, "ddar" ]
         remote_args.extend(args)
         self._p = subprocess.Popen(' '.join(remote_args),
                                    stdin=subprocess.PIPE,
@@ -1067,7 +1067,7 @@ def main():
             if not args['c']:
                 raise OptionError('remote archive only permitted with -c')
             host, filename = args['f'].split(':')
-            remote_args = [ '-c', '-f', filename ]
+            remote_args = [ '--server', '-c', '-f', filename ]
             if args['N']:
                 remote_args.extend(['-N', args['N']])
             remote_args.extend(args['member'])
