@@ -311,20 +311,21 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             pass
         self.db.commit()
 
-    def store(self, tag, f=sys.stdin, aio=False, server=False,
-              pipeline_size=None):
+    def store_server(self, tag):
         cursor = self.db.cursor()
         member_id = self._store_add_member(cursor, tag)
-        if server:
-            return self._StoreRPCServer(archive=self,
-                                        member_id=member_id,
-                                        cursor=cursor).loop()
-        else:
-            try:
-                self._store(cursor, member_id, f, aio,
-                            pipeline_size=pipeline_size)
-            finally:
-                self._store_commit(cursor)
+        return self._StoreRPCServer(archive=self,
+                                    member_id=member_id,
+                                    cursor=cursor).loop()
+
+    def store(self, tag, f=sys.stdin, aio=False, pipeline_size=None):
+        cursor = self.db.cursor()
+        member_id = self._store_add_member(cursor, tag)
+        try:
+            self._store(cursor, member_id, f, aio,
+                        pipeline_size=pipeline_size)
+        finally:
+            self._store_commit(cursor)
 
     def _analyze_and_store(self, cursor, dds, member_id, pipeline_size=None):
         if pipeline_size is None:
@@ -973,7 +974,7 @@ def parse_args(args):
 
 def main_add_one(store, filename, tag, server=False, pipeline_size=None):
     if server:
-        store.store(tag, None, server=True, pipeline_size=pipeline_size)
+        store.store_server(tag)
     elif filename == '-':
         store.store(tag, sys.stdin, pipeline_size=pipeline_size)
     else:
