@@ -20,12 +20,12 @@ import tbl.netstring as netstring
 PROTOCOL_MAGIC = "ddar"
 PROTOCOL_VERSION = "1" # ASCII decimal string for readability
 
-def _check_protocol(in_f, out_f, passive=False):
+def _check_protocol(ipc, passive=False):
     decoder = netstring.Decoder()
 
     def _send(m):
-        out_f.write(netstring.encode(m))
-        out_f.flush()
+        ipc.out_f.write(netstring.encode(m))
+        ipc.out_f.flush()
 
     def _read_one_netstring():
         # Read one byte at a time to avoid reading too much and making
@@ -34,7 +34,7 @@ def _check_protocol(in_f, out_f, passive=False):
         while True:
             for s in decoder.feed(data):
                 return s
-            data = in_f.read(1)
+            data = ipc.in_f.read(1)
             if data == '':
                 raise ConsoleError('remote process closed unexpectedly')
 
@@ -443,7 +443,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             self.ipc.out_f.flush()
 
         def loop(self):
-            _check_protocol(self.ipc.in_f, self.ipc.out_f)
+            _check_protocol(self.ipc)
 
             decoder = netstring.Decoder()
             _set_nonblocking(self.ipc.in_f)
@@ -744,7 +744,7 @@ class RemoteArchive(Archive):
         self.decoder = netstring.Decoder()
         self.request_q = collections.deque()
 
-        _check_protocol(self.ipc.in_f, self.ipc.out_f, passive=True)
+        _check_protocol(self.ipc, passive=True)
         _set_nonblocking(self.ipc.in_f)
 
     def _not_implemented(self):
