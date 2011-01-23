@@ -311,12 +311,16 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             pass
         self.db.commit()
 
-    def store_server(self, tag):
+    def store_server(self, ipc, tag):
         cursor = self.db.cursor()
         member_id = self._store_add_member(cursor, tag)
-        return self._StoreRPCServer(archive=self,
-                                    member_id=member_id,
-                                    cursor=cursor).loop()
+        server = self._StoreRPCServer(archive=self,
+                                      ipc=ipc,
+                                      member_id=member_id,
+                                      cursor=cursor)
+        result = server.loop()
+        server.close()
+        return result
 
     def store(self, tag, f=sys.stdin, aio=False, pipeline_size=None):
         cursor = self.db.cursor()
@@ -379,8 +383,9 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                                     member_id=member_id).flush()
 
     class _StoreRPCServer(object):
-        def __init__(self, archive, member_id, cursor):
+        def __init__(self, archive, ipc, member_id, cursor):
             self.archive = archive
+            self.ipc = ipc
             self.member_id = member_id
             self.cursor = cursor
 
@@ -434,17 +439,17 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                     break
             else:
                 raise RuntimeError("Couldn't find reply field in wrapper")
-            sys.stdout.write(netstring.encode(wrapped_reply.SerializeToString()))
-            sys.stdout.flush()
+            self.ipc.out_f.write(netstring.encode(wrapped_reply.SerializeToString()))
+            self.ipc.out_f.flush()
 
         def loop(self):
-            _check_protocol(sys.stdin, sys.stdout)
+            _check_protocol(self.ipc.in_f, self.ipc.out_f)
 
             decoder = netstring.Decoder()
-            _set_nonblocking(sys.stdin)
+            _set_nonblocking(self.ipc.in_f)
 
             try:
-                data = _read_some(sys.stdin)
+                data = _read_some(self.ipc.in_f)
                 while data:
                     for encoded_request in decoder.feed(data):
                         request_container = tbl.ddar_pb2.Request()
@@ -452,7 +457,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                         for req_type, req in request_container.ListFields():
                             self._rpc_request(req_type.name, req)
 
-                    data = _read_some(sys.stdin)
+                    data = _read_some(self.ipc.in_f)
             finally:
                 # Same as local: commit anyway to get any partial writes. This
                 # will be consistent since we are careful about storing chunk
@@ -461,6 +466,9 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                 # This could have also happened on CommitRequest but a
                 # duplicate is fine
                 self.archive._store_commit(self.cursor)
+
+        def close(self):
+            self.ipc.close()
 
     def load(self, tag, f=sys.stdout):
         cursor = self.db.cursor()
@@ -974,7 +982,7 @@ def parse_args(args):
 
 def main_add_one(store, filename, tag, server=False, pipeline_size=None):
     if server:
-        store.store_server(tag)
+        store.store_server(ipc=StdIPC(), tag=tag)
     elif filename == '-':
         store.store(tag, sys.stdin, pipeline_size=pipeline_size)
     else:
@@ -1025,6 +1033,17 @@ class RshIPC(object):
         result = self._p.wait()
         if result != 0:
             raise ConsoleError('remote process returned %d' % result)
+
+class StdIPC(object):
+    '''IPC using stdin and stdout (eg. we were called by a remote process via
+    ssh)'''
+    def __init__(self):
+        self.in_f = sys.stdin
+        self.out_f = sys.stdout
+
+    def close(self):
+        '''Close will happen when process exits'''
+        pass
 
 def main():
     try:
