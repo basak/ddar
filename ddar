@@ -728,20 +728,15 @@ WHERE
         return status
 
 class RemoteArchive(Archive):
-    def __init__(self, rsh, server, args):
+    def __init__(self, ipc):
         # Override parent completely
-        remote_args = [ rsh, server, "ddar", "--server" ]
-        remote_args.extend(args)
-        p = subprocess.Popen(' '.join(remote_args),
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True,
-                close_fds=True)
+        self.ipc = ipc
 
-        _check_protocol(p.stdout, p.stdin, passive=True)
-
-        _set_nonblocking(p.stdout)
-        self.rsh = p
         self.decoder = netstring.Decoder()
         self.request_q = collections.deque()
+
+        _check_protocol(self.ipc.in_f, self.ipc.out_f, passive=True)
+        _set_nonblocking(self.ipc.in_f)
 
     def _not_implemented(self):
         raise NotImplementedError()
@@ -755,17 +750,14 @@ class RemoteArchive(Archive):
     fsck = _not_implemented
 
     def close(self):
-        self.rsh.stdin.close()
-        result = self.rsh.wait()
-        if result != 0:
-            raise ConsoleError('Remote process returned %d' % result)
+        self.ipc.close()
 
     def _read_one_netstring(self):
         data = None
         while True:
             for s in self.decoder.feed(data):
                 return s
-            data = _read_some(self.rsh.stdout)
+            data = _read_some(self.ipc.in_f)
             if data == '':
                 raise ConsoleError('remote process closed unexpectedly')
 
@@ -804,13 +796,13 @@ class RemoteArchive(Archive):
     def _request(self, request, callback):
         enc_req = netstring.encode(request.SerializeToString())
         try:
-            self.rsh.stdin.write(enc_req)
+            self.ipc.out_f.write(enc_req)
+            self.ipc.out_f.flush()
         except IOError, e:
             if e.errno == errno.EPIPE:
                 raise ConsoleError('remote process closed unexpectedly')
             else:
                 raise
-        self.rsh.stdin.flush()
         request = self._RemoteArchiveReply(self, callback)
         self.request_q.append(request)
         return request
@@ -1014,6 +1006,25 @@ def main_extract(store, members):
     for tag in members:
         store.load(tag, sys.stdout)
 
+class RshIPC(object):
+    def __init__(self, cmd, host, args):
+        remote_args = [ cmd, host, "ddar", "--server" ]
+        remote_args.extend(args)
+        self._p = subprocess.Popen(' '.join(remote_args),
+                                   stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE,
+                                   shell=True,
+                                   close_fds=True)
+
+        self.in_f = self._p.stdout
+        self.out_f = self._p.stdin
+    
+    def close(self):
+        self.out_f.close()
+        result = self._p.wait()
+        if result != 0:
+            raise ConsoleError('remote process returned %d' % result)
+
 def main():
     try:
         args = parse_args(sys.argv[1:])
@@ -1035,7 +1046,7 @@ def main():
         if ':' in args['f']:
             if not args['c']:
                 raise OptionError('remote archive only permitted with -c')
-            server, filename = args['f'].split(':')
+            host, filename = args['f'].split(':')
             remote_args = [ '-c', '-f', filename ]
             if args['N']:
                 remote_args.extend(['-N', args['N']])
@@ -1044,7 +1055,8 @@ def main():
                 rsh = args['rsh']
             else:
                 rsh = 'ssh'
-            archive = RemoteArchive(rsh=rsh, server=server, args=remote_args)
+            ipc = RshIPC(cmd=rsh, host=host, args=remote_args)
+            archive = RemoteArchive(ipc)
             args['f'] = filename
             if args['pipeline-size'] is None:
                 args['pipeline-size'] = '8'
