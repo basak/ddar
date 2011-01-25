@@ -80,3 +80,8 @@ it_does_not_delete_used_blocks() {
 	ddar xf archive 2|cmp - foo
 	fsck archive
 }
+
+it_will_not_shell_out_for_source() {
+	ddar cf archive \!false && false
+	test $? -eq 2
+}

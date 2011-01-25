@@ -989,11 +989,26 @@ def main_add_one(store, filename, tag, ipc=None, pipeline_size=None):
     elif filename == '-':
         store.store(tag, sys.stdin, pipeline_size=pipeline_size)
     else:
-        f = open(filename, 'rb')
+        if filename[0] == '!':
+            filename = filename[1:]
+            p = subprocess.Popen([filename], stdout=subprocess.PIPE,
+                                 close_fds=True, shell=True)
+            f = p.stdout
+            aio = False
+            def close():
+                result = p.wait()
+                if result:
+                    raise ConsoleError('process %s returned %s' %
+                                            (filename, result))
+        else:
+            f = open(filename, 'rb')
+            aio = True
+            def close():
+                f.close()
         try:
-            store.store(tag, f, aio=True, pipeline_size=pipeline_size)
+            store.store(tag, f, aio=aio, pipeline_size=pipeline_size)
         finally:
-            f.close()
+            close()
 
 def main_add(store, members, tag=None, ipc=None, pipeline_size=None):
     if not members:
@@ -1067,6 +1082,8 @@ def main():
 
         if len(args['member']) > 1 and (':' in args['f'] or args['server']):
             raise OptionError('can only add one item at once to remote archive')
+        if not args['sender'] and any(x[0] == '!' for x in args['member']):
+            raise OptionError('shell out is for remote sources only; use stdin')
 
         if args['rsh']:
             rsh = args['rsh']

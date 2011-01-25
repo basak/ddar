@@ -65,3 +65,8 @@ it_stores_from_a_file_with_a_name() {
 	ddar -cf localhost:archive foo -N baz
 	[ `ddar -xf $REMOTE_TOP/archive baz` = bar ]
 }
+
+it_will_not_shell_out_for_source() {
+	ddar -cf localhost:archive \!false && false
+	test $? -eq 2
+}

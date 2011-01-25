@@ -11,7 +11,7 @@ after() {
 }
 
 ddar() {
-	"$DDAR_SRC/ddar" --rsh "$DDAR_SRC/t/rsh" $@
+	"$DDAR_SRC/ddar" --rsh "$DDAR_SRC/t/rsh" "$@"
 }
 
 fsck() {
@@ -62,4 +62,9 @@ it_stores_from_a_file_with_a_name() {
 	echo bar > "$REMOTE_TOP/foo"
 	ddar -cf archive localhost:foo -N baz
 	[ `ddar -xf archive baz` = bar ]
+}
+
+it_will_shell_out_for_source() {
+	ddar -cf archive localhost:!echo\\\ foo -N bar
+	[ `ddar -xf archive bar` = foo ]
 }
