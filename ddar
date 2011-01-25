@@ -1189,11 +1189,27 @@ Check an archive for integrity:
 
 
 Examples:
-    Back up your home directory daily:
-        tar c ~|gzip --rsyncable|ddar cf /mnt/external_disk/home_backup
 
-    Restore your home directory after a disaster:
-        ddar xf /mnt/external_disk/home_backup|tar xzC/
+  Back up your home directory daily:
+
+    To an external disk:
+
+      tar c ~|gzip --rsyncable|ddar cf /mnt/external_disk/home_backup
+
+
+    To a remote server (using ssh, with ddar also installed remotely):
+
+      tar c ~|gzip --rsyncable|ddar cf server:home_backup
+
+
+  Back up your home directory on a remote server to a local machine daily:
+
+      ddar cf server_home_backup "server:!'tar c ~|gzip --rsyncable'"
+
+
+  Restore your home directory after a disaster:
+
+      ddar xf /mnt/external_disk/home_backup|tar xzC/
 '''
         return
     except OptionError, e:
