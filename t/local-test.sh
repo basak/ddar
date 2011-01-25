@@ -71,3 +71,12 @@ it_deletes_a_member_in_the_middle_of_the_archive() {
 	! ddar xf archive B >/dev/null
 	fsck archive
 }
+
+it_does_not_delete_used_blocks() {
+	echo bar > foo
+	ddar cf archive -N 1 < foo
+	ddar cf archive -N 2 < foo
+	ddar df archive 1
+	ddar xf archive 2|cmp - foo
+	fsck archive
+}
