@@ -22,6 +22,23 @@ DEFAULT_REMOTE_PIPELINE_SIZE = '8' # string for cmdline equiv.
 PROTOCOL_MAGIC = "ddar"
 PROTOCOL_VERSION = "1" # ASCII decimal string for readability
 
+def _sysread(fileobj, bufsize=4096):
+    '''Read up to bufsize bytes, whatever is available, blocking until at least
+    something is available. This is different from fileobj.read() because it
+    will only read what is available, rather than waiting until the full data
+    is read. Non-blocking mode is awkward because if stdin and stdout are the
+    same socket then we have to deal with non-blocking writes, too, so we don't
+    use it, and in fact assume that the fileobj is blocking.'''
+    fd = fileobj.fileno()
+    while True:
+        try:
+            data = os.read(fd, bufsize)
+        except IOError, e:
+            if e.errno != errno.EINTR:
+                raise
+        else:
+            return data
+
 def _check_protocol(ipc, passive=False):
     decoder = netstring.Decoder()
 
@@ -36,7 +53,7 @@ def _check_protocol(ipc, passive=False):
         while True:
             for s in decoder.feed(data):
                 return s
-            data = ipc.in_f.read(1)
+            data = _sysread(ipc.in_f, 1)
             if data == '':
                 raise ConsoleError('remote process closed unexpectedly')
 
@@ -65,30 +82,6 @@ def _check_protocol(ipc, passive=False):
 class ConsoleError(RuntimeError):
     def __init__(self, m):
         self.message = m
-
-def _set_nonblocking(fileobj):
-    fd = fileobj.fileno()
-    fl = fcntl.fcntl(fd, fcntl.F_GETFL)
-    fcntl.fcntl(fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-
-def _read_some(fileobj):
-    while True:
-        try:
-            # Attempt an initial read before a select. It seems that Python
-            # can hold some data buffered from a previous read, causing a
-            # select to block indefinitely even though there is data available
-            # because the fileobj has read it in already. At least this is
-            # my best guess based on the behaviour I was seeing.
-            data = fileobj.read()
-        except IOError, e:
-            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                select.select([fileobj.fileno()], [], [], None)
-            elif e.errno == errno.EINTR:
-                pass
-            else:
-                raise
-        else:   
-            return data
 
 class _ImmediateRequest(object):
     def __init__(self, reply):
@@ -448,10 +441,9 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             _check_protocol(self.ipc)
 
             decoder = netstring.Decoder()
-            _set_nonblocking(self.ipc.in_f)
 
             try:
-                data = _read_some(self.ipc.in_f)
+                data = _sysread(self.ipc.in_f)
                 while data:
                     for encoded_request in decoder.feed(data):
                         request_container = tbl.ddar_pb2.Request()
@@ -459,7 +451,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
                         for req_type, req in request_container.ListFields():
                             self._rpc_request(req_type.name, req)
 
-                    data = _read_some(self.ipc.in_f)
+                    data = _sysread(self.ipc.in_f)
             finally:
                 # Same as local: commit anyway to get any partial writes. This
                 # will be consistent since we are careful about storing chunk
@@ -747,7 +739,6 @@ class RemoteArchive(Archive):
         self.request_q = collections.deque()
 
         _check_protocol(self.ipc, passive=True)
-        _set_nonblocking(self.ipc.in_f)
 
     def _not_implemented(self):
         raise NotImplementedError()
@@ -768,7 +759,7 @@ class RemoteArchive(Archive):
         while True:
             for s in self.decoder.feed(data):
                 return s
-            data = _read_some(self.ipc.in_f)
+            data = _sysread(self.ipc.in_f)
             if data == '':
                 raise ConsoleError('remote process closed unexpectedly')
 
