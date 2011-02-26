@@ -1154,13 +1154,15 @@ def main():
         print '''ddar: store multiple files efficiently in a de-duplicated archive
 
 Create or add to an archive:
-    ddar [-]c [-f] archive [-N member-name] < file
-    ddar [-]c [-f] archive [-N member-name] member
     ddar [-]c [-f] archive member [member...]
+    ddar [-]c [-f] [server:]archive [-N member-name] < file
+    ddar [-]c [-f] [server:]archive [-N member-name] member
+    ddar [-]c [-f] archive server:member [-N member-name]
+    ddar [-]c [-f] archive server:!cmd [-N member-name]
 
     If member-name is unspecified, ddar will use the supplied filename
-    as the member name, or for stdin create a suitable name based on the
-    current date.
+    as the member name, or if none is available then it will create a
+    suitable name based on the current date.
 
 Extract from an archive:
     ddar [-]x [options] [-f] archive > file  # extract the most recent member

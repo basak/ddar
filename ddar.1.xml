@@ -4,9 +4,11 @@
 <manpage name="ddar" section="1" desc="store multiple files efficiently in a de-duplicated archive">
 
 <synopsis>
-<cmd>ddar [-]c [-f] <arg>archive</arg> [-N <arg>member-name</arg>] &lt; <arg>member</arg></cmd>
-<cmd>ddar [-]c [-f] <arg>archive</arg> [-N <arg>member-name</arg>] <arg>member</arg></cmd>
 <cmd>ddar [-]c [-f] <arg>archive</arg> <arg>member</arg> [<arg>member</arg>...]</cmd>
+<cmd>ddar [-]c [-f] [<arg>server</arg>:]<arg>archive</arg> [-N <arg>member-name</arg>] &lt; <arg>member</arg></cmd>
+<cmd>ddar [-]c [-f] [<arg>server</arg>:]<arg>archive</arg> [-N <arg>member-name</arg>] <arg>member</arg></cmd>
+<cmd>ddar [-]c [-f] <arg>archive</arg> <arg>server</arg>:<arg>member</arg> [-N <arg>member-name</arg>]</cmd>
+<cmd>ddar [-]c [-f] <arg>archive</arg> <arg>server</arg>:!<arg>cmd</arg> [-N <arg>member-name</arg>]</cmd>
 <cmd>ddar [-]x [<arg>options</arg>] [-f] <arg>archive</arg> &gt; <arg>member</arg></cmd>
 <cmd>ddar [-]x [<arg>options</arg>] [-f] <arg>archive</arg> <arg>member-name</arg> &gt; <arg>member</arg></cmd>
 <cmd>ddar [-]t [-f] <arg>archive</arg></cmd>
@@ -19,16 +21,21 @@
 holding a collection of other files in a structure that makes it possible to
 retrieve the original individual files (called members of the archive).</p>
 
-<p>Members of an archive are stored efficiently: ddar finds areas that are the
-same across members and stores them only once.</p>
+<p>Members of an archive are stored efficiently: ddar finds regions that are
+the same across members and stores them only once.</p>
 
-<p>ddar is intended to augment the standard tar | gzip -style pipeline,
-eliminating the need and complexities of incremental and differential backups
-by making the storage of multiple large full backups equally feasible.</p>
+<p>ddar follows the Unix philosophy, dealing only with the task of
+de-duplication. It is intended to be used in conjunction with other standard
+Unix tools such as <manref name="tar" section="1"/> and <manref name="gzip"
+section="1"/>. For example, it can be used to augment the standard tar | gzip
+-style pipeline, eliminating the need and complexities of incremental and
+differential backups by making the storage of multiple large full backups
+equally feasible.</p>
 
-<p>ddar is less sophisticated than <manref name="tarsnap" section="1"/>, but is
-useful for local archive storage in cases where the available upload bandwidth
-is too low to deal with the size of the archive that needs to be created.</p>
+<p>ddar may be considered a companion to <manref name="tarsnap" section="1"/>.
+Is useful for local archive storage in cases where the available upload
+bandwidth is too low to deal with the size of the archive that needs to be
+created.</p>
 </description>
 
 <section name="Mandatory arguments">
@@ -40,8 +47,14 @@ is mandatory, the prefix <arg>-</arg> is optional if the operation is the first 
 <p><opt>c</opt></p>
 <optdesc>Add <arg>member</arg> to <arg>archive</arg>. If <arg>archive</arg>
 does not exist, it will be created. If <arg>member-name</arg> is not specified,
-then the base name of <arg>member</arg> is used; if stdin is used, then a
-suitable name is automatically generated.</optdesc>
+then the base name of <arg>member</arg> is used; if not specified, then a
+suitable name is automatically generated. If <arg>server</arg> is specified
+(where permitted), then the archive or member is accessed from
+<arg>server</arg> as appropriate, with de-duplication taking place at the
+source to save bandwidth. If <arg>cmd</arg> is specified, then it is called to
+generate the member data on its stdout. All remote options require <manref
+name="ssh" section="1"/> to be available and for ddar to also be installed at
+the remote end.</optdesc>
 </option>
 
 <option>
@@ -107,27 +120,42 @@ use the relatime option to help avoid this, which has been the default since
 <p>ddar will run more efficiently if the archive is stored on a filesystem that
 does not degrade as directories become large, such as ext3 or ext4 with
 dir_index enabled.</p>
+<p>Normally, compression and encryption algorithms have the property that a
+single bit flip in the input cause a complete apparant change in the output.
+This works contrary to de-duplication, which looks for regions that are the
+same to optimise storage. To avoid this issue, use <cmd>gzip --rsyncable</cmd>
+for compression and if encryption is required then encrypt the entire archive,
+for example with LUKS or Truecrypt.</p>
 </section>
 
 <section name="Examples">
-<p>Back up your home directory daily:</p>
+<p>Back up your home directory to an external disk daily:</p>
 <cmd>tar c ~|gzip --rsyncable|ddar cf /mnt/external_disk/home_backup</cmd>
-<p>Restore your home directory after a disaster:</p>
+<p>Back up your home directory to a remote server daily (using ssh, with ddar
+also installed remotely):</p>
+<cmd>tar c ~|gzip --rsyncable|ddar cf server:home_backup</cmd>
+<p>Back up your home directory on a remote server to a local machine daily:</p>
+<cmd>ddar cf server_home_backup "server:!'tar c ~|gzip --rsyncable'"</cmd>
+<p>Restore your home directory from a local disk after a disaster:</p>
 <cmd>ddar xf /mnt/external_disk/home_backup|tar xzC/</cmd>
+<p>Restore your home directory from a remote server after a disaster:</p>
+<cmd>ssh server ddar xf home_backup|tar xzC/</cmd>
 </section>
 
 <section name="Security">
-<p>ddar relies on system security and does not provide anything further. You
-may wish to keep your ddar archives in a directory to which only you have
-access, adjust the permission bits on the ddar archive directories
-themselves and/or encrypt the entire filesystem on which your ddar archives are
-stored. For a secure, hosted de-duplicating backup solution, try tarsnap
-&lt;<url href="http://www.tarsnap.com/"/>&gt;.</p>
+<p>ddar relies on system security and does not encrypt data. For remote
+archives, it relies on <manref name="ssh" section="1"/> to encrypt
+communications. You may wish to keep your ddar archives in a directory to which
+only you have access, adjust the permission bits on the ddar archive
+directories themselves and/or encrypt the entire filesystem on which your ddar
+archives are stored. For a cryptographically secure, hosted de-duplicating
+backup solution, try <manref name="tarsnap" section="1"/> &lt;<url
+href="http://www.tarsnap.com/"/>&gt;.</p>
 </section>
 
 <section name="Bugs">
 <p>ddar currently assumes that SHA-256 never collides. Although no collisions
-are known to date (2010), collisions must nevertheless exist due to the
+are known to date (2011), collisions must nevertheless exist due to the
 pigeonhole principle. However, the probability of such a collision occurring is
 so low that it is considered far more likely that the computer will perform a
 random computation error, so save for a SHA-256 weakness being found ddar
