@@ -186,7 +186,17 @@ tool.</p>
 </section>
 
 <section name="Copyright">
-<p>Copyright 2010 True Blue Logic Ltd.</p>
+<p>Copyright 2010-2011 True Blue Logic Ltd.</p>
+<p>This program is free software: you can redistribute it and/or modify it
+under the terms of version 3 of the GNU General Public License as published by
+the Free Software Foundation.</p>
+<p>This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+details.</p>
+<p>You should have received a copy of the GNU General Public License along with
+this program.  If not, see &lt;<url
+href="http://www.gnu.org/licenses/"/>&gt;.</p>
 <p>This manpage is in part derived from <manref name="ar" section="1"/>; thus
 the following notices apply:</p>
 <p>Copyright (c) 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000,
