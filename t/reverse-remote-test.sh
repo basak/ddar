@@ -65,6 +65,11 @@ it_stores_from_a_file_with_a_name() {
 }
 
 it_will_shell_out_for_source() {
-	ddar -cf archive localhost:!echo\\\ foo -N bar
+	ddar -cf archive localhost:\!echo\\\ foo -N bar
 	[ `ddar -xf archive bar` = foo ]
+}
+
+it_will_shell_out_with_pipe_for_source() {
+	ddar -cf archive "localhost:\!'echo abc|tr abc def'" -N bar
+	[ `ddar -xf archive bar` = def ]
 }

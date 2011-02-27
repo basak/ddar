@@ -1041,11 +1041,11 @@ def main_extract(store, members):
 class RshIPC(object):
     def __init__(self, cmd, host, args):
         remote_args = [ cmd, host, "ddar" ]
-        remote_args.extend(args)
-        self._p = subprocess.Popen(' '.join(remote_args),
+        remote_args.append(' '.join(args))
+        self._p = subprocess.Popen(remote_args,
                                    stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE,
-                                   shell=True,
+                                   shell=False,
                                    close_fds=True)
 
         self.in_f = self._p.stdout

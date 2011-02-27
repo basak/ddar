@@ -7,4 +7,4 @@ if [ "$1" != "ddar" ]; then
 	exit 1
 fi
 shift
-exec "$DDAR_SRC/ddar" "$@"
+exec /bin/sh -c "$DDAR_SRC/ddar $@"
