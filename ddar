@@ -1128,7 +1128,10 @@ def main():
             archive = Archive(args['f'], auto_create=True)
             
             host, filename = args['member'][0].split(':')
-            args['member'][0] = filename
+            if filename[0] == '!':
+                args['member'] = []
+            else:
+                args['member'][0] = filename
             remote_args = [ '--sender', '-c', filename ]
             if args['N']:
                 remote_args.extend(['-N', args['N']])

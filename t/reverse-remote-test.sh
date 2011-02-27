@@ -73,3 +73,9 @@ it_will_shell_out_with_pipe_for_source() {
 	ddar -cf archive "localhost:\!'echo abc|tr abc def'" -N bar
 	[ `ddar -xf archive bar` = def ]
 }
+
+it_will_auto_name_when_shelling_out() {
+	ddar -cf archive localhost:\!echo\\\ foo
+	# This will race once a year. Oh well.
+	[ `ddar -tf archive|cut -d- -f1` = `date +%Y` ]
+}
