@@ -1211,7 +1211,7 @@ Examples:
 
   Back up your home directory on a remote server to a local machine daily:
 
-      ddar cf server_home_backup "server:!'tar c ~|gzip --rsyncable'"
+      ddar cf server_home_backup "server:\!'tar c ~|gzip --rsyncable'"
 
 
   Restore your home directory after a disaster:

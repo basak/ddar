@@ -135,7 +135,7 @@ for example with LUKS or Truecrypt.</p>
 also installed remotely):</p>
 <cmd>tar c ~|gzip --rsyncable|ddar cf server:home_backup</cmd>
 <p>Back up your home directory on a remote server to a local machine daily:</p>
-<cmd>ddar cf server_home_backup "server:!'tar c ~|gzip --rsyncable'"</cmd>
+<cmd>ddar cf server_home_backup "server:\\!'tar c ~|gzip --rsyncable'"</cmd>
 <p>Restore your home directory from a local disk after a disaster:</p>
 <cmd>ddar xf /mnt/external_disk/home_backup|tar xzC/</cmd>
 <p>Restore your home directory from a remote server after a disaster:</p>
