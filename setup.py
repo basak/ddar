@@ -13,6 +13,6 @@ setup(name='ddar',
                                            'synctus/ddsmodule.c'],
                               include_dirs=['.'],
                               libraries=['rt']) ],
-      install_requires=['google.protobuf'])
+      install_requires=['protobuf'])
 
 # vim: set ts=8 sts=4 sw=4 ai et :
