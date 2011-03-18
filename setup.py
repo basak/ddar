@@ -1,6 +1,15 @@
 #!/usr/bin/python
 
+import sys
 from setuptools import setup, Extension
+
+if sys.platform == 'linux2':
+    define_macros = [ ('HAVE_AIO', None),
+                    ]
+    libraries = [ 'rt' ]
+else:
+    define_macros = []
+    libraries = []
 
 setup(name='ddar',
       version='0.1',
@@ -12,7 +21,8 @@ setup(name='ddar',
       ext_modules=[ Extension('synctus._dds', ['scan.c', 'rabin.c',
                                            'synctus/ddsmodule.c'],
                               include_dirs=['.'],
-                              libraries=['rt']) ],
+                              libraries=libraries,
+                              define_macros=define_macros) ],
       install_requires=['protobuf'])
 
 # vim: set ts=8 sts=4 sw=4 ai et :
