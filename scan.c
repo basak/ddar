@@ -14,7 +14,9 @@
    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#ifdef HAVE_FADVISE
 #define _XOPEN_SOURCE 600
+#endif
 #define _FILE_OFFSET_BITS 64
 #include <stdlib.h>
 #include <stdio.h>
@@ -102,7 +104,9 @@ static void finish_sync_io(struct scan_ctx *scan) {
     int bytes_read;
 
     bytes_read = retry_read(scan, scan->io_destination, scan->buffer_size / 3);
+#ifdef HAVE_FADVISE
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+#endif
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
@@ -158,7 +162,9 @@ static void finish_aio(struct scan_ctx *scan) {
 	    longjmp(scan->jmp_env, 1);
     }
 
+#ifdef HAVE_FADVISE
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+#endif
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
