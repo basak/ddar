@@ -15,7 +15,6 @@
 */
 
 #define _XOPEN_SOURCE 600
-#define _GNU_SOURCE
 #define _FILE_OFFSET_BITS 64
 #include <stdlib.h>
 #include <stdio.h>
@@ -81,7 +80,9 @@ static int retry_read(struct scan_ctx *scan, unsigned char *p,
     start = p;
     end = p + bytes_to_read;
     while (p < end) {
-	result = TEMP_FAILURE_RETRY(read(scan->fd, p, end - p));
+	do {
+	    result = read(scan->fd, p, end - p);
+	} while (result < 0 && errno == EINTR);
 	if (result < 0) {
 	    longjmp(scan->jmp_env, 1);
 	} else if (!result) {
@@ -122,9 +123,13 @@ static void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
 static void finish_aio(struct scan_ctx *scan) {
     int bytes_read;
     off_t required_offset, lseek_result;
+    int result;
 
     const struct aiocb *cblist[1] = { &scan->aiocb };
-    if (TEMP_FAILURE_RETRY(aio_suspend(cblist, 1, 0))) {
+    do {
+	result = aio_suspend(cblist, 1, 0);
+    } while (result < 0 && errno == EINTR);
+    if (result) {
 	longjmp(scan->jmp_env, 1);
     }
     if (aio_error(&scan->aiocb)) {
