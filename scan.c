@@ -26,7 +26,9 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#ifdef HAVE_AIO
 #include <aio.h>
+#endif
 #include <string.h>
 #include <setjmp.h>
 
@@ -63,7 +65,9 @@ struct scan_ctx {
     int minimum_chunk_size;
     int maximum_chunk_size;
 
+#ifdef HAVE_AIO
     struct aiocb aiocb;
+#endif
     unsigned char *io_destination;
 
     void (*start_io)(struct scan_ctx *, unsigned char *);
@@ -108,6 +112,8 @@ static void finish_sync_io(struct scan_ctx *scan) {
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
+
+#ifdef HAVE_AIO
 
 static void start_aio(struct scan_ctx *scan, unsigned char *buffer) {
     memset(&scan->aiocb, 0, sizeof(scan->aiocb));
@@ -164,6 +170,8 @@ static void finish_aio(struct scan_ctx *scan) {
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
+
+#endif /* #ifdef HAVE_AIO */
 
 static inline void read_more_data(struct scan_ctx *scan) {
     unsigned char *head = scan->p + scan->bytes_left;
@@ -347,10 +355,18 @@ void scan_set_fd(struct scan_ctx *scan, int fd) {
     scan->fd = fd;
 }
 
+#ifdef HAVE_AIO
+
 void scan_set_aio(struct scan_ctx *scan) {
     scan->start_io = start_aio;
     scan->finish_io = finish_aio;
 }
+
+#else
+
+void scan_set_aio(struct scan_ctx *scan) {}
+
+#endif
 
 int scan_begin(struct scan_ctx *scan) {
     if (setjmp(scan->jmp_env))
