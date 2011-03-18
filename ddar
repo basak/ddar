@@ -352,8 +352,7 @@ CREATE TABLE chunk (member_id INTEGER NOT NULL,
             length = len(data)
             chunk_h = hashlib.sha256(data).digest()
 
-            request = self._have_chunk(cursor=cursor,
-                                       h=hashlib.sha256(data).digest())
+            request = self._have_chunk(cursor=cursor, h=chunk_h)
 
             # Update running stats
             total_length[0] += length
