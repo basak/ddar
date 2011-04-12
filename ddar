@@ -14,8 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import binascii, collections, errno, hashlib, fcntl, os, os.path, select
-import stat, string, sqlite3, subprocess, sys, tempfile, time
+import binascii, collections, errno, hashlib, itertools, fcntl, os, os.path
+import select, stat, string, sqlite3, subprocess, sys, tempfile, time
 
 import synctus.ddar_pb2, synctus.dds
 import synctus.netstring as netstring
@@ -910,14 +910,16 @@ def parse_args(args, pos_arg_names=None, bool_options=None, arg_options=None,
     arg_options = arg_options or set()
     exclusive_options = exclusive_options or set()
 
-    all_options = bool_options | arg_options | exclusive_options
+    all_options = (bool_options | arg_options |
+                   set(itertools.chain(*exclusive_options)))
     single_letter_options = set([x for x in all_options if len(x) == 1])
     long_options = set([x for x in all_options if len(x) > 1])
 
     def set_result(k, v):
-        if k in exclusive_options and any((k in result for k in exclusive_options)):
-            option_list = ', '.join(('-' if len(opt) == 1 else '--') + opt for opt in exclusive_options)
-            raise OptionError('only one of %s may be specified' % option_list)
+        for excl_set in exclusive_options:
+            if k in excl_set and any((k in result for k in excl_set)):
+                option_list = ', '.join(('-' if len(opt) == 1 else '--') + opt for opt in excl_set)
+                raise OptionError('only one of %s may be specified' % option_list)
         result[k] = v
 
     def parse_long_option(arg_iter, arg):
@@ -1095,7 +1097,8 @@ ddar_arg_spec = {
     'bool_options': set('ctxd') | set([ 'fsck', 'force-stdout', 'server',
                                         'sender', 'sha256sum' ]),
     'arg_options': set([ 'f', 'N', 'rsh', 'pipeline-size' ]),
-    'exclusive_options': set([ 'c', 't', 'x', 'd', 'fsck', 'sha256sum' ])
+    'exclusive_options': set([frozenset([ 'c', 't', 'x', 'd', 'fsck',
+                                          'sha256sum' ])])
 }
 
 def main():
