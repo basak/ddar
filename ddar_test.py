@@ -6,7 +6,7 @@ import ddar
 
 class TestArgParser(unittest.TestCase):
     def check_result(self, cmdline, result):
-        test_result = ddar.parse_args(cmdline.split())
+        test_result = ddar.parse_args(cmdline.split(), **ddar.ddar_arg_spec)
         
         # Remove anything that is not set (None) for brevity in individual
         # tests. We check the None behaviour in test_none.
@@ -17,7 +17,7 @@ class TestArgParser(unittest.TestCase):
         self.assertEquals(test_result, result)
 
     def test_none(self):
-        result = ddar.parse_args([])
+        result = ddar.parse_args([], **ddar.ddar_arg_spec)
         self.assert_(all((result[v] is None for v in 'ctxdf')))
         self.assertEqual(result['member'], [])
 

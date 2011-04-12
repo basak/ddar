@@ -895,7 +895,8 @@ class OptionError(RuntimeError):
 
 class OptionHelpRequest(Exception): pass
 
-def parse_args(args):
+def parse_args(args, pos_arg_names=None, bool_options=None, arg_options=None,
+               exclusive_options=None):
     # The argument parser options are modelled after GNU ar, tar, gzip and
     # tarsnap. The aim is to not confuse or annoy anyone already familiar with
     # those tools by behaving as one would expect. Unfortunately I can't seem
@@ -904,20 +905,19 @@ def parse_args(args):
 
     result = {}
     pos_args = []
-    pos_arg_names = [ 'member' ]
+    pos_arg_names = pos_arg_names or []
+    bool_options = bool_options or set()
+    arg_options = arg_options or set()
+    exclusive_options = exclusive_options or set()
 
-    bool_options = set('ctxd') | set([ 'fsck', 'force-stdout', 'server',
-                                       'sender', 'sha256sum' ])
-    arg_options = set([ 'f', 'N', 'rsh', 'pipeline-size' ])
-    command_options = set([ 'c', 't', 'x', 'd', 'fsck', 'sha256sum' ])
-
-    all_options = bool_options | arg_options | command_options
+    all_options = bool_options | arg_options | exclusive_options
     single_letter_options = set([x for x in all_options if len(x) == 1])
     long_options = set([x for x in all_options if len(x) > 1])
 
     def set_result(k, v):
-        if k in command_options and any((k in result for k in command_options)):
-            raise OptionError('only one command option may be specified')
+        if k in exclusive_options and any((k in result for k in exclusive_options)):
+            option_list = ', '.join(('-' if len(opt) == 1 else '--') + opt for opt in exclusive_options)
+            raise OptionError('only one of %s may be specified' % option_list)
         result[k] = v
 
     def parse_long_option(arg_iter, arg):
@@ -1090,9 +1090,17 @@ class StdIPC(object):
         '''Close will happen when process exits'''
         pass
 
+ddar_arg_spec = {
+    'pos_arg_names': [ 'member' ],
+    'bool_options': set('ctxd') | set([ 'fsck', 'force-stdout', 'server',
+                                        'sender', 'sha256sum' ]),
+    'arg_options': set([ 'f', 'N', 'rsh', 'pipeline-size' ]),
+    'exclusive_options': set([ 'c', 't', 'x', 'd', 'fsck', 'sha256sum' ])
+}
+
 def main():
     try:
-        args = parse_args(sys.argv[1:])
+        args = parse_args(sys.argv[1:], **ddar_arg_spec)
         if not any((args[k] for k in (list('cxtd') + ['fsck', 'sha256sum']))):
             raise OptionError('a command is required')
         if not args['f'] and not args['sender']:
