@@ -1,7 +1,7 @@
-import hashlib, tbl.dds
+import hashlib, synctus.dds
 
 f = open('corpus1', 'r')
-d = tbl.dds.DDS()
+d = synctus.dds.DDS()
 d.set_file(f)
 d.begin()
 offset = 0
