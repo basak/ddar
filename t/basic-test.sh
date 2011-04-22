@@ -1,17 +1,4 @@
-before() {
-	top=`mktemp --tmpdir -d ddar-test.XXXXXXXXXX`
-	ddar_src=`pwd`
-	PATH="$ddar_src:$PATH"
-	cd $top
-}
-
-after() {
-	rm -Rf $top
-}
-
-fsck() {
-	ddar --fsck "$1"
-}
+. t/local-functions
 
 it_shows_usage_1() {
 	result=`ddar -h`
