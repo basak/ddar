@@ -14,6 +14,7 @@
 <cmd>ddar [-]t [-f] <arg>archive</arg></cmd>
 <cmd>ddar [-]d [-f] <arg>archive</arg> <arg>member-name</arg> [<arg>member-name</arg>...]</cmd>
 <cmd>ddar --fsck [-f] <arg>archive</arg></cmd>
+<cmd>ddar --sha256sum [-f] <arg>archive</arg> [<arg>member</arg>...]</cmd>
 </synopsis>
 
 <description>
@@ -40,8 +41,9 @@ created.</p>
 
 <section name="Mandatory arguments">
 <p>One operation argument from <arg>c</arg>, <arg>x</arg>, <arg>t</arg>,
-<arg>d</arg> or <arg>--fsck</arg> must be specified. As specifying an operation
-is mandatory, the prefix <arg>-</arg> is optional if the operation is the first argument.</p>
+<arg>d</arg>, <arg>--fsck</arg> or <arg>--sha256sum</arg> must be specified. As
+specifying an operation is mandatory, the prefix <arg>-</arg> is optional if
+the operation is the first argument.</p>
 
 <option>
 <p><opt>c</opt></p>
@@ -82,6 +84,12 @@ order, not time).</optdesc>
 that all members match the checksum computed when they were first stored. This
 operation is extremely time consuming, requiring two passes over the
 data.</optdesc>
+</option>
+
+<option>
+<p><opt>--sha256sum</opt></p>
+<optdesc>Print SHA-256 digests of members where available. If no members are
+specified, then print the digests of all members in the archive.</optdesc>
 </option>
 
 <option>

@@ -743,6 +743,29 @@ WHERE
         status = status and self._fsck_db_to_fs_member()
         return status
 
+    def print_sha256sum(self, tags):
+        def _print_row(row):
+            # Double space to match sha256sum output format
+            if row[0] is None:
+                print '-  %s' % row[1]
+            else:
+                print '%s  %s' % (binascii.hexlify(str(row[0])), row[1])
+
+        cursor = self.db.cursor()
+        if tags:
+            for tag in tags:
+                cursor.execute('SELECT hash, name FROM member WHERE name=? LIMIT 1', (tag,))
+                row = cursor.fetchone()
+                if not row:
+                    raise ConsoleError('member not found: %s' % tag)
+                _print_row(row)
+        else:
+            cursor.execute('SELECT hash, name FROM member')
+            row = cursor.fetchone()
+            while row:
+                _print_row(row)
+                row = cursor.fetchone()
+
 class RemoteArchive(Archive):
     def __init__(self, ipc):
         # Override parent completely
@@ -884,9 +907,9 @@ def parse_args(args):
     pos_arg_names = [ 'member' ]
 
     bool_options = set('ctxd') | set([ 'fsck', 'force-stdout', 'server',
-                                       'sender' ])
+                                       'sender', 'sha256sum' ])
     arg_options = set([ 'f', 'N', 'rsh', 'pipeline-size' ])
-    command_options = set([ 'c', 't', 'x', 'd', 'fsck' ])
+    command_options = set([ 'c', 't', 'x', 'd', 'fsck', 'sha256sum' ])
 
     all_options = bool_options | arg_options | command_options
     single_letter_options = set([x for x in all_options if len(x) == 1])
@@ -1070,7 +1093,7 @@ class StdIPC(object):
 def main():
     try:
         args = parse_args(sys.argv[1:])
-        if not any((args[k] for k in (list('cxtd') + ['fsck']))):
+        if not any((args[k] for k in (list('cxtd') + ['fsck', 'sha256sum']))):
             raise OptionError('a command is required')
         if not args['f'] and not args['sender']:
             try:
@@ -1159,6 +1182,8 @@ def main():
                 archive.close()
                 print 'fsck returned errors'
                 sys.exit(1)
+        elif args['sha256sum']:
+            archive.print_sha256sum(args['member'])
 
         archive.close()
 
