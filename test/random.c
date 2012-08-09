@@ -28,12 +28,13 @@ int read_seed(char *seed) {
 int main(int argc, char **argv) {
     /* Usage: random length < seed */
     assert(argc >= 2);
-    long bytes_needed = atol(argv[1]);
+    long long bytes_needed = atoll(argv[1]);
     char seed[MAX_SEED];
     uint32_t random;
     uint32_t *buffer;
     char *p;
-    int words_needed, i, bytes_to_write;
+    long long words_needed;
+    int i, bytes_to_write;
 
     buffer = (uint32_t *)malloc(BUFSIZE * sizeof(uint32_t));
     assert(buffer);
