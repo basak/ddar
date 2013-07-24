@@ -11,8 +11,7 @@ setup(name='ddar',
       scripts=['ddar'],
       ext_modules=[ Extension('synctus._dds', ['scan.c', 'rabin.c',
                                            'synctus/ddsmodule.c'],
-                              include_dirs=['.'],
-                              libraries=['rt']) ],
+                              include_dirs=['.']) ],
       install_requires=['protobuf'])
 
 # vim: set ts=8 sts=4 sw=4 ai et :
