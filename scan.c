@@ -38,6 +38,14 @@
 #define likely(x) __builtin_expect(x, 1)
 #define unlikely(x) __builtin_expect(x, 0)
 
+#ifndef __linux__
+#define TEMP_FAILURE_RETRY(expr) \
+    ({ long int _res; \
+        do _res = (long int) (expr); \
+        while (_res == -1L && errno == EINTR); \
+        _res; })
+#endif
+
 struct scan_ctx {
     /* The main read buffer itself */
     unsigned char *buffer[3];
@@ -97,7 +105,9 @@ static void finish_sync_io(struct scan_ctx *scan) {
     int bytes_read;
 
     bytes_read = retry_read(scan, scan->io_destination, scan->buffer_size / 3);
+#ifdef  __linux__
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+#endif
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
@@ -147,7 +157,9 @@ static void finish_aio(struct scan_ctx *scan) {
 	    longjmp(scan->jmp_env, 1);
     }
 
+#ifdef  __linux__
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+#endif
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
