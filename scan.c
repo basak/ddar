@@ -38,6 +38,10 @@
 #define likely(x) __builtin_expect(x, 1)
 #define unlikely(x) __builtin_expect(x, 0)
 
+#if defined(_POSIX_ADVISORY_INFO) && (_POSIX_ADVISORY_INFO > 0)
+# define HAVE_POSIX_FADVISE
+#endif
+
 struct scan_ctx {
     /* The main read buffer itself */
     unsigned char *buffer[3];
@@ -97,7 +101,9 @@ static void finish_sync_io(struct scan_ctx *scan) {
     int bytes_read;
 
     bytes_read = retry_read(scan, scan->io_destination, scan->buffer_size / 3);
+#ifdef HAVE_POSIX_FADVISE
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+#endif
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
@@ -147,7 +153,9 @@ static void finish_aio(struct scan_ctx *scan) {
 	    longjmp(scan->jmp_env, 1);
     }
 
+#ifdef HAVE_POSIX_FADVISE
     posix_fadvise(scan->fd, scan->source_offset, bytes_read, POSIX_FADV_DONTNEED);
+#endif
     scan->source_offset += bytes_read;
     scan->bytes_left += bytes_read;
 }
