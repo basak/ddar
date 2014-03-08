@@ -12,7 +12,7 @@ else:
     libraries = []
 
 setup(name='ddar',
-      version='0.1',
+      version='1.0',
       author='Robie Basak',
       author_email='rb@synctus.com',
       url='http://www.synctus.com/ddar',
