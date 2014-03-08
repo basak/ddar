@@ -1,5 +1,5 @@
-ddar (0.1-1) lucid; urgency=low
+ddar (1.0-0~nodistro1) trusty; urgency=low
 
   * Initial release.
 
- -- Robie Basak <rb@synctus.com>  Tue, 28 Dec 2010 13:11:16 +0000
+ -- Robie Basak <rb@synctus.com>  Sat, 08 Mar 2014 16:56:33 +0000
