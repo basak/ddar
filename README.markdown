@@ -3,7 +3,7 @@ ddar
 
 ddar is a free de-duplicating archiver for Unix. Save space, bandwidth and time by storing duplicate regions of data only once.
 
-For details, see: [http://www.synctus.com/ddar/][1].
+For details, see [the wiki][1].
 
 Installation
 ------------
@@ -35,6 +35,6 @@ guidelines:
    should be documented there.
 
 
-[1]: http://www.synctus.com/ddar/
+[1]: https://github.com/basak/ddar/wiki
 [2]: http://code.google.com/p/protobuf/
 [3]: https://github.com/basak/ddar
